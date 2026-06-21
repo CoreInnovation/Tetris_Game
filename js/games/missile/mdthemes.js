@@ -1,6 +1,7 @@
 /* =========================================================
-   Missile Defense themes. Classic = retro vector; Modern = neon
-   with glow, gradient sky, and heavy explosion bloom.
+   Missile Defense themes (visual skins). Cold-launch is now a
+   WEAPON (powerup), not a skin — so every skin carries the rocket
+   palette keys (body/exhaust) used by the missile weapon.
    ========================================================= */
 (function (Arcade) {
   "use strict";
@@ -12,7 +13,8 @@
       ground: "#39d353", city: "#36c5f0", battery: "#ffd24d", ammo: "#eaeaf0",
       enemy: "#ff5a5a", enemyHead: "#ffd0d0", interceptor: "#9affff", target: "#ffffff",
       blast: "#ffcf57", crosshair: "#ffffff", text: "#eaeaf0", textDim: "#8a8aa0",
-      accent: "#ffd24d", bg1: "#04060a", bg2: "#04060a", rubble: "#5a5a66"
+      accent: "#ffd24d", bg1: "#04060a", bg2: "#04060a", rubble: "#5a5a66",
+      body: "#dfe6f0", exhaust: "#ffae3a", exhaust2: "#ffe08a", person: "#eaeaf0", powerup: "#ffd24d"
     },
     effects: { glow: false, particles: true, shake: false, scanlines: true, bgAnim: false },
     fonts: { ui: '"Consolas","Courier New",monospace' }
@@ -25,13 +27,13 @@
       ground: "#46f0a0", city: "#5ad1ff", battery: "#ffd24d", ammo: "#cfe6ff",
       enemy: "#ff4d6d", enemyHead: "#ffd0dd", interceptor: "#7affe0", target: "#ffffff",
       blast: "#ffd66b", crosshair: "#8affff", text: "#f0f4ff", textDim: "#9aa6c8",
-      accent: "#46f0c0", bg1: "#05071a", bg2: "#0c0822", rubble: "#4a4a5a"
+      accent: "#46f0c0", bg1: "#05071a", bg2: "#0c0822", rubble: "#4a4a5a",
+      body: "#dbeaff", exhaust: "#ffd24d", exhaust2: "#fff1a8", person: "#cfe0ff", powerup: "#46f0c0"
     },
     effects: { glow: true, particles: true, shake: true, scanlines: false, bgAnim: true },
     fonts: { ui: '"Segoe UI",system-ui,-apple-system,Roboto,sans-serif' }
   };
 
-  // "Warhead" — interceptors render as real rockets with exhaust plumes.
   const WARHEAD = {
     id: "warhead",
     name: "Warhead",
@@ -40,9 +42,10 @@
       enemy: "#ff5a4d", enemyHead: "#ffd2cc", interceptor: "#e8eef7", target: "#ffffff",
       blast: "#ffce5e", crosshair: "#9fe8ff", text: "#eaf2ff", textDim: "#9aa6c8",
       accent: "#ffb43a", bg1: "#0a1422", bg2: "#06101c", rubble: "#4a4a5a",
-      body: "#e2e9f3", exhaust: "#ffb43a", exhaust2: "#fff2ac"
+      body: "#e2e9f3", exhaust: "#ffb43a", exhaust2: "#fff2ac", person: "#dfe6f0", powerup: "#ffb43a"
     },
-    missileStyle: "rocket", exhaust: true,
+    // standard interceptors also render as straight-flight rockets in this skin
+    missileStyle: "rocket",
     effects: { glow: true, particles: true, shake: true, scanlines: false, bgAnim: true },
     fonts: { ui: '"Segoe UI",system-ui,-apple-system,Roboto,sans-serif' }
   };

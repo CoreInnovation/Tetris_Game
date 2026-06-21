@@ -134,7 +134,16 @@
         // Asteroids / Missile Defense
         case "shoot":    this._tone(900, 0.07, "square", 0.12, 300); break;
         case "launch":   this._tone(120, 0.40, "sawtooth", 0.18, 620); this._noise(0.34, 0.13); break;
+        case "eject":    this._tone(155, 0.13, "sine", 0.22, 66); this._noise(0.14, 0.10); break;
+        case "artillery": this._tone(95, 0.16, "square", 0.22, 52); this._noise(0.12, 0.13); break;
+        case "rail":     this._tone(1500, 0.09, "sawtooth", 0.16, 520); this._noise(0.05, 0.08); break;
+        case "cryo":     this._tone(820, 0.26, "sine", 0.12, 1700); break;
         case "boom":     this._tone(110, 0.22, "sawtooth", 0.22, 38); this._noise(0.18, 0.16); break;
+        // Space Pinball
+        case "flip":     this._tone(280, 0.04, "square", 0.12); break;
+        case "bump":     this._tone(720, 0.07, "square", 0.20, 540); break;
+        case "plunger":  this._tone(170, 0.20, "sawtooth", 0.20, 540); break;
+        case "drain":    this._tone(330, 0.40, "sine", 0.18, 70); break;
         case "ufo":      this._tone(520, 0.26, "square", 0.10, 720); break;
         case "extralife": this._arp([523, 659, 784, 1047], 0.07, "square"); break;
         default: break;

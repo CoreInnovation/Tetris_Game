@@ -105,6 +105,7 @@
       const savedTheme = ctx.storage.get("tetris:theme", "modern");
       this.theme = T.getTheme(savedTheme);
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("tetris:song", 0) | 0));
+      this.dev = false;
 
       this._unsub = [];
       this.paused = false;
@@ -184,6 +185,7 @@
       this._toast("♪ " + name, this.theme.palette.accent);
       return name;
     }
+    toggleDev() { this.dev = !this.dev; this._toast(this.dev ? "DEV: gravity paused" : "DEV OFF", this.theme.palette.accent, true); return this.dev; }
 
     destroy() {
       this.audio.stopMusic();
@@ -589,7 +591,7 @@
       } else {
         const interval = this.softDropping
           ? Math.min(this.gravityMs, SOFT_MAX_INTERVAL)
-          : this.gravityMs;
+          : (this.dev ? 100000 : this.gravityMs);
         this.dropTimer += dt;
         let guard = 0, softSteps = 0;
         while (this.dropTimer >= interval && guard < 40) {

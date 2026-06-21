@@ -13,7 +13,9 @@ runtime — no audio files):
   4+ to clear, wipe out the goofy viruses, with chain reactions and rising levels.
 - 🚀 **Asteroids** — rotate/thrust/fire vector shooter; split rocks, dodge UFOs, clear waves.
 - 🛰️ **Missile Defense** — aim with the mouse/finger, intercept incoming missiles with
-  expanding chain-reaction blasts, protect your cities.
+  expanding chain-reaction blasts, an arsenal of weapons (powerups + heat/cooldown), UFOs.
+- 🪐 **Space Pinball** — an original space-cadet-style pinball table: real ball physics,
+  flippers, pop bumpers, slingshots, a plunger, and multiball.
 
 Most games have two music tracks (a clean version + a techno remix; Dr. Quackers has three) —
 switch with `N` / 🎵. The music **tempo speeds up as you climb levels**, true to the originals.
@@ -46,7 +48,8 @@ or copy the whole `Tetris_Game` folder to a USB stick and it works anywhere.)
 | Hold piece (Tetris) | `C` or `Shift` |
 
 **Asteroids**: `←`/`→` rotate · `↑` thrust · `Space` fire · `Z` hyperspace
-**Missile Defense**: move the mouse/finger to aim · click/tap to fire (or arrow keys + `Space`)
+**Missile Defense**: mouse/finger to aim · click/tap to fire · keys `1`-`9` / click chips to switch weapons · 🛠️ dev mode
+**Space Pinball**: `←`/`Z` left flipper · `→`/`/` right flipper · hold `Space` to charge the plunger, release to launch
 
 **Anytime**
 
@@ -110,8 +113,10 @@ Tetris_Game/
    │  │  ├─ drthemes.js · drrenderer.js · drmario.js · index.js
    │  ├─ asteroids/        Asteroids (vector shooter)
    │  │  ├─ astthemes.js · astrenderer.js · asteroids.js · index.js
-   │  └─ missile/          Missile Defense (pointer-aimed)
-   │     ├─ mdthemes.js · mdrenderer.js · missiledefense.js · index.js
+   │  ├─ missile/          Missile Defense (pointer-aimed)
+   │  │  ├─ mdthemes.js · mdrenderer.js · missiledefense.js · index.js
+   │  └─ pinball/          Space Pinball (physics)
+   │     ├─ pinthemes.js · pinrenderer.js · pinball.js · index.js
    └─ main.js              boot
 ```
 

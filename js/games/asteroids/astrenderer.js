@@ -73,16 +73,58 @@
     }
 
     drawAsteroid(ctx, a, theme) {
+      const col = a.slow > 0 ? "#bfeaff" : theme.palette.asteroid;
       const pts = a.shape.map(s => ({ x: Math.cos(s.a) * s.r * a.radius, y: Math.sin(s.a) * s.r * a.radius }));
-      this._poly(ctx, pts, a.x, a.y, a.angle, theme.palette.asteroid, theme, 12, theme.effects.glow ? 0.08 : 0);
+      this._poly(ctx, pts, a.x, a.y, a.angle, col, theme, 12, theme.effects.glow ? 0.08 : 0);
     }
 
     drawBullet(ctx, b, theme) {
-      const p = theme.palette;
+      const col = b.color || theme.palette.bullet;
       ctx.save();
-      this._glow(ctx, theme, p.bullet, 12);
-      ctx.fillStyle = p.bullet;
+      this._glow(ctx, theme, col, 12);
+      ctx.fillStyle = col;
       ctx.beginPath(); ctx.arc(b.x, b.y, theme.effects.glow ? 3 : 2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    drawPowerup(ctx, theme, pu, now, weapon) {
+      const col = (weapon && weapon.color) || theme.palette.accent, r = pu.radius, pulse = 0.7 + 0.3 * Math.sin(now / 120);
+      ctx.save(); ctx.translate(pu.x, pu.y);
+      this._glow(ctx, theme, col, theme.effects.glow ? 14 : 0);
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.fillStyle = rgba(col, 0.18 * pulse);
+      ctx.beginPath(); ctx.moveTo(0, -r * 1.2); ctx.lineTo(r, 0); ctx.lineTo(0, r * 1.2); ctx.lineTo(-r, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.shadowBlur = 0; ctx.fillStyle = theme.palette.text || "#fff"; ctx.font = "700 11px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText((weapon && weapon.name ? weapon.name[0] : "?"), 0, 1);
+      ctx.restore();
+    }
+
+    drawBlackhole(ctx, theme, bh) {
+      const t = Math.min(1, bh.t / bh.dur), R = bh.range * (0.34 + 0.16 * t);
+      ctx.save(); ctx.translate(bh.x, bh.y);
+      if (theme.effects.glow) { ctx.shadowBlur = 20; ctx.shadowColor = bh.color; }
+      ctx.strokeStyle = bh.color; ctx.lineWidth = 3;
+      for (let i = 0; i < 3; i++) { ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(0, 0, R * (0.5 + i * 0.26), 0, Math.PI * 1.5); ctx.stroke(); ctx.rotate(0.6 + t * 2); }
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.fillStyle = "#05030a"; ctx.beginPath(); ctx.arc(0, 0, R * 0.42, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = rgba(bh.color, 0.85); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, R * 0.42, 0, 6.2832); ctx.stroke();
+      ctx.restore();
+    }
+
+    drawZap(ctx, theme, z) {
+      const a = Math.max(0, z.life / 0.22);
+      ctx.save();
+      if (theme.effects.glow) { ctx.shadowBlur = 12; ctx.shadowColor = z.color; }
+      ctx.strokeStyle = rgba(z.color, a); ctx.lineWidth = 2.2; ctx.lineJoin = "round"; ctx.beginPath();
+      for (let i = 0; i < z.points.length - 1; i++) { const p0 = z.points[i], p1 = z.points[i + 1], segs = 4; ctx.moveTo(p0.x, p0.y); for (let k = 1; k <= segs; k++) { const t = k / segs, jx = (k < segs) ? (Math.random() * 12 - 6) : 0, jy = (k < segs) ? (Math.random() * 12 - 6) : 0; ctx.lineTo(p0.x + (p1.x - p0.x) * t + jx, p0.y + (p1.y - p0.y) * t + jy); } }
+      ctx.stroke(); ctx.restore();
+    }
+
+    drawWeaponTag(ctx, theme, weapon, ammo, dev) {
+      const p = theme.palette;
+      ctx.save(); ctx.textBaseline = "bottom"; ctx.textAlign = "left"; ctx.font = "700 13px " + theme.fonts.ui;
+      const col = (weapon && weapon.color) || p.accent; ctx.fillStyle = col;
+      if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; }
+      const amt = (ammo === "∞") ? "∞" : ("x" + ammo);
+      ctx.fillText("◢ " + (weapon ? weapon.name : "") + "  " + amt + (dev ? "  [DEV]" : ""), 18, this.h - 12);
       ctx.restore();
     }
 
