@@ -1,7 +1,9 @@
 /* =========================================================
-   Asteroids — vector space shooter. Rotate, thrust, fire; blast
-   rocks into smaller rocks; clear the wave; dodge the UFO.
-   Implements the Arcade GameInstance interface.
+   Asteroids — vector space shooter with a full WEAPON ARSENAL
+   (ported in spirit from Missile Defense): rapid, spread, seekers,
+   cryo, tesla, cluster, nuke, singularity. Weapon powerup pods drift
+   in space — shoot them or fly into them to collect. Dev mode (🛠️)
+   unlocks every weapon + makes the ship invulnerable for testing.
    ========================================================= */
 (function (Arcade) {
   "use strict";
@@ -9,14 +11,26 @@
   const A = Arcade.Asteroids;
   const MK = Arcade.MusicKit;
 
-  // tuning (physics in seconds)
   const ROT = 4.2, THRUST = 330, MAXV = 470, DRAG = 0.35;
-  // BULLET_LIFE tripled (0.85 -> 2.55) = 3x range; bullet cap raised so the
-  // longer-lived shots don't starve the fire rate.
-  const BULLET_V = 560, BULLET_LIFE = 2.55, FIRE_CD = 160, MAX_BULLETS = 16, SHIP_R = 14;
-  const INVULN = 2400, RESPAWN = 1000;
+  const SHIP_R = 14, INVULN = 2400, RESPAWN = 1000;
   const SIZE_R = { 3: 46, 2: 26, 1: 14 }, SIZE_SCORE = { 3: 20, 2: 50, 1: 100 };
   const UFO_SCORE = { big: 200, small: 1000 };
+  const HOMING_TURN = 4.6, BH_PULL = 330, AMMO_GRANT = 40, AST_SLOW = 0.4, MAX_BULLETS = 48;
+
+  // ---- arsenal ----
+  const WEAPONS = [
+    { id: "blaster", name: "BLASTER", base: true, cd: 150, speed: 560, life: 2.6, color: null },
+    { id: "rapid", name: "RAPID", cd: 80, speed: 940, life: 1.5, color: "#7afcff" },
+    { id: "spread", name: "SPREAD", cd: 300, speed: 520, life: 1.3, pellets: 5, fan: 0.72, color: "#ffe14d" },
+    { id: "seeker", name: "SEEKERS", cd: 380, speed: 380, life: 3.2, homing: true, count: 3, color: "#9aff6a" },
+    { id: "cryo", name: "CRYO", cd: 280, speed: 520, life: 2.2, freeze: 3.2, color: "#8fd9ff" },
+    { id: "tesla", name: "TESLA", cd: 300, speed: 900, life: 1.8, chain: 4, color: "#b388ff" },
+    { id: "cluster", name: "CLUSTER", cd: 360, speed: 470, life: 0.55, split: 6, color: "#ff9a3a" },
+    { id: "nuke", name: "NUKE", cd: 720, speed: 360, life: 2.4, blast: 130, color: "#ff5a5a" },
+    { id: "singularity", name: "SINGULARITY", cd: 950, speed: 380, life: 2.0, blackhole: true, color: "#c86bff" }
+  ];
+  const WMAP = {}; WEAPONS.forEach(w => WMAP[w.id] = w);
+  A.WEAPONS = WEAPONS;
 
   // ---- music ----
   const AST_CLASSIC = {
@@ -46,10 +60,7 @@
       { drum: true, gain: 0.20, notes: MK.backbeat(8) }
     ]
   };
-  const SONGS = [
-    { id: "classic", name: "Heartbeat", song: AST_CLASSIC },
-    { id: "techno", name: "Techno Remix", song: AST_TECHNO }
-  ];
+  const SONGS = [{ id: "classic", name: "Heartbeat", song: AST_CLASSIC }, { id: "techno", name: "Techno Remix", song: AST_TECHNO }];
   A.SONGS = SONGS;
 
   function rand(a, b) { return a + Math.random() * (b - a); }
@@ -61,10 +72,10 @@
       this.renderer = new A.Renderer();
       this.theme = A.getTheme(ctx.storage.get("asteroids:theme", "modern"));
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("asteroids:song", 0) | 0));
+      this.touchLabels = { left: "◀", right: "▶", cw: "THRUST", ccw: "WARP", hard: "FIRE", hold: "", soft: "" };
+      this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600;
-      // On touch, relabel the shared control bar for this game (hide unused).
-      this.touchLabels = { left: "◀", right: "▶", cw: "THRUST", ccw: "WARP", hard: "FIRE", hold: "", soft: "" };
       this._bindInput();
     }
 
@@ -74,8 +85,10 @@
     _reset() {
       this.score = 0; this.lives = 3; this.wave = 0; this.nextExtra = 10000;
       this.bullets = []; this.enemyBullets = []; this.asteroids = []; this.ufo = null;
+      this.powerups = []; this.blackholes = []; this.zaps = [];
+      this.weapon = "blaster"; this.ammo = {}; if (this.dev) WEAPONS.forEach(w => this.ammo[w.id] = Infinity);
       this.fireCd = 0; this.respawnT = 0; this.shakeMag = 0; this.toasts = [];
-      this.ufoTimer = rand(12000, 22000);
+      this.ufoTimer = rand(12000, 22000); this.powerupTimer = rand(8000, 13000);
       this.particles.clear();
       this._spawnShip(true);
       this.state = "playing"; this.paused = false;
@@ -98,26 +111,29 @@
     cycleMusic() {
       this.songIdx = (this.songIdx + 1) % SONGS.length;
       this.shell.storage.set("asteroids:song", this.songIdx);
-      this._applyMusic();
-      const name = SONGS[this.songIdx].name; this._toast("♪ " + name); return name;
+      this._applyMusic(); const name = SONGS[this.songIdx].name; this._toast("♪ " + name); return name;
     }
+    toggleDev() {
+      this.dev = !this.dev;
+      if (this.dev) WEAPONS.forEach(w => this.ammo[w.id] = Infinity);
+      else WEAPONS.forEach(w => { if (!w.base && this.ammo[w.id] === Infinity) this.ammo[w.id] = 0; });
+      this._toast(this.dev ? "DEV MODE ON — all weapons + invuln" : "DEV MODE OFF");
+      return this.dev;
+    }
+
+    _has(id) { const w = WMAP[id]; return !!w && (w.base || this.dev || (this.ammo[id] || 0) > 0); }
 
     _bindInput() {
       const input = this.shell.input;
       this._unsub.push(input.onDown((code, e, repeat) => {
         if (this.paused || this.state !== "playing" || repeat) return;
         if (code === "KeyZ" || code === "ShiftLeft" || code === "ShiftRight") this._hyperspace();
+        else if (code.indexOf("Digit") === 0) { const n = parseInt(code.slice(5), 10) - 1; if (n >= 0 && n < WEAPONS.length && this._has(WEAPONS[n].id)) { this.weapon = WEAPONS[n].id; this.audio.play("select"); } }
       }));
     }
 
-    _spawnShip(center) {
-      this.ship = { x: this._w / 2, y: this._h / 2, vx: 0, vy: 0, angle: -Math.PI / 2,
-        thrusting: false, alive: true, radius: SHIP_R, invuln: center ? 1500 : INVULN };
-    }
-    _respawnShip() {
-      this.ship.x = this._w / 2; this.ship.y = this._h / 2; this.ship.vx = 0; this.ship.vy = 0;
-      this.ship.angle = -Math.PI / 2; this.ship.alive = true; this.ship.invuln = INVULN; this.ship.thrusting = false;
-    }
+    _spawnShip(center) { this.ship = { x: this._w / 2, y: this._h / 2, vx: 0, vy: 0, angle: -Math.PI / 2, thrusting: false, alive: true, radius: SHIP_R, invuln: center ? 1500 : INVULN }; }
+    _respawnShip() { const s = this.ship; s.x = this._w / 2; s.y = this._h / 2; s.vx = 0; s.vy = 0; s.angle = -Math.PI / 2; s.alive = true; s.invuln = INVULN; s.thrusting = false; }
 
     _nextWave() {
       this.wave++;
@@ -129,87 +145,109 @@
 
     _spawnAsteroid(size, x, y) {
       if (x == null) {
-        // spawn away from the ship; cap tries so a tiny canvas can't hang it
-        const safe = Math.min(170, Math.hypot(this._w, this._h) * 0.4);
-        let tries = 0;
-        do { x = rand(0, this._w); y = rand(0, this._h); }
-        while (this.ship && Math.hypot(x - this.ship.x, y - this.ship.y) < safe && ++tries < 40);
+        const safe = Math.min(170, Math.hypot(this._w, this._h) * 0.4); let tries = 0;
+        do { x = rand(0, this._w); y = rand(0, this._h); } while (this.ship && Math.hypot(x - this.ship.x, y - this.ship.y) < safe && ++tries < 40);
       }
-      const sp = rand(30, 60) + (3 - size) * 30 + this.wave * 3;
-      const dir = rand(0, Math.PI * 2);
-      this.asteroids.push({ x: x, y: y, vx: Math.cos(dir) * sp, vy: Math.sin(dir) * sp,
-        radius: SIZE_R[size], size: size, shape: shape(), angle: rand(0, Math.PI * 2), spin: rand(-1.4, 1.4) });
+      const sp = rand(30, 60) + (3 - size) * 30 + this.wave * 3, dir = rand(0, Math.PI * 2);
+      this.asteroids.push({ x: x, y: y, vx: Math.cos(dir) * sp, vy: Math.sin(dir) * sp, radius: SIZE_R[size], size: size, shape: shape(), angle: rand(0, Math.PI * 2), spin: rand(-1.4, 1.4), slow: 0 });
+    }
+
+    _addBullet(x, y, a, w, flags) {
+      if (this.bullets.length >= MAX_BULLETS) return;
+      const s = this.ship;
+      this.bullets.push(Object.assign({ x: x, y: y, vx: s.vx + Math.cos(a) * w.speed, vy: s.vy + Math.sin(a) * w.speed, life: w.life, color: w.color, wid: w.id }, flags || {}));
     }
 
     _fire() {
-      if (this.bullets.length >= MAX_BULLETS) return;
+      const w = WMAP[this.weapon]; if (!w) return;
       const s = this.ship, nx = s.x + Math.cos(s.angle) * s.radius, ny = s.y + Math.sin(s.angle) * s.radius;
-      this.bullets.push({ x: nx, y: ny, vx: s.vx + Math.cos(s.angle) * BULLET_V, vy: s.vy + Math.sin(s.angle) * BULLET_V, life: BULLET_LIFE });
-      this.audio.play("shoot");
+      if (w.pellets) { for (let i = 0; i < w.pellets; i++) { const a = s.angle + (i / (w.pellets - 1) - 0.5) * w.fan; this._addBullet(nx, ny, a, w); } }
+      else if (w.homing) { for (let i = 0; i < (w.count || 3); i++) { const a = s.angle + (i - (w.count - 1) / 2) * 0.26; this._addBullet(nx, ny, a, w, { homing: true }); } }
+      else this._addBullet(nx, ny, s.angle, w, { blast: w.blast || 0, freeze: w.freeze || 0, chain: w.chain || 0, split: w.split || 0, blackhole: !!w.blackhole });
+      if (!w.base && !this.dev) { this.ammo[w.id] = (this.ammo[w.id] || 0) - 1; if (this.ammo[w.id] <= 0) { this.weapon = "blaster"; this._toast(w.name + " depleted"); } }
+      this.audio.play(w.id === "nuke" ? "boom" : "shoot");
     }
 
     _hyperspace() {
       if (!this.ship.alive) return;
       this.ship.x = rand(40, this._w - 40); this.ship.y = rand(40, this._h - 40);
-      this.ship.vx = 0; this.ship.vy = 0; this.ship.invuln = 1200;
-      this.audio.play("hold");
+      this.ship.vx = 0; this.ship.vy = 0; this.ship.invuln = 1200; this.audio.play("hold");
       if (this.theme.effects.particles) this._burst(this.ship.x, this.ship.y, this.theme.palette.ship, 16);
     }
 
-    _hyperToast() {}
-
-    _wrap(o) {
-      if (o.x < 0) o.x += this._w; else if (o.x > this._w) o.x -= this._w;
-      if (o.y < 0) o.y += this._h; else if (o.y > this._h) o.y -= this._h;
-    }
+    _wrap(o) { if (o.x < 0) o.x += this._w; else if (o.x > this._w) o.x -= this._w; if (o.y < 0) o.y += this._h; else if (o.y > this._h) o.y -= this._h; }
 
     _burst(x, y, color, count, speed) {
       if (!this.theme.effects.particles) return;
-      this.particles.emit({ x: x, y: y, count: count, colors: [color, "#ffffff"],
-        speedMin: 40, speedMax: speed || 240, gravity: 0, drag: 0.8,
-        sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "square", spin: 6 });
+      this.particles.emit({ x: x, y: y, count: count, colors: [color, "#ffffff"], speedMin: 40, speedMax: speed || 240, gravity: 0, drag: 0.8, sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "square", spin: 6 });
     }
 
     _explodeAsteroid(a) {
       this.audio.play("boom");
       this._burst(a.x, a.y, this.theme.palette.asteroid, 8 + a.size * 6, 120 + a.size * 60);
       if (this.theme.effects.shake) this._shake(2 + a.size * 1.6);
-      this.score += SIZE_SCORE[a.size];
-      this._checkExtra();
+      this.score += SIZE_SCORE[a.size]; this._checkExtra();
       if (a.size > 1) { this._spawnAsteroid(a.size - 1, a.x, a.y); this._spawnAsteroid(a.size - 1, a.x, a.y); }
     }
 
-    _checkExtra() {
-      if (this.score >= this.nextExtra) { this.lives++; this.nextExtra += 10000; this.audio.play("extralife"); this._toast("EXTRA SHIP!", true); }
+    _nuke(x, y, r) {
+      this.audio.play("boom"); this._burst(x, y, this.theme.palette.thrust || "#ff5a5a", 30, 320);
+      if (this.theme.effects.shake) this._shake(8);
+      for (let j = this.asteroids.length - 1; j >= 0; j--) { const a = this.asteroids[j]; if (Math.hypot(a.x - x, a.y - y) < r + a.radius) { this.asteroids.splice(j, 1); this._explodeAsteroid(a); } }
+      if (this.ufo && Math.hypot(this.ufo.x - x, this.ufo.y - y) < r + this.ufo.radius) { this.score += this.ufo.small ? UFO_SCORE.small : UFO_SCORE.big; this._burst(this.ufo.x, this.ufo.y, this.theme.palette.ufo, 24, 280); this.ufo = null; }
     }
 
+    _chainZap(x, y, color, jumps) {
+      let cx = x, cy = y; const used = {}; const pts = [{ x: x, y: y }]; const hit = [];
+      for (let k = 0; k < jumps; k++) {
+        let best = -1, bd = 1e9;
+        for (let j = 0; j < this.asteroids.length; j++) { if (used[j]) continue; const a = this.asteroids[j]; const d = Math.hypot(a.x - cx, a.y - cy); if (d < 170 && d < bd) { bd = d; best = j; } }
+        if (best < 0) break; used[best] = 1; const a = this.asteroids[best]; pts.push({ x: a.x, y: a.y }); cx = a.x; cy = a.y; hit.push(best);
+      }
+      hit.sort((p, q) => q - p).forEach(j => { const a = this.asteroids[j]; this.asteroids.splice(j, 1); this._explodeAsteroid(a); });
+      if (pts.length > 1) { this.zaps.push({ points: pts, life: 0.22, color: color || "#b388ff" }); if (this.theme.effects.shake) this._shake(3); }
+    }
+
+    _spawnBlackhole(x, y) { this.blackholes.push({ x: x, y: y, t: 0, dur: 1.25, range: 200, color: "#c86bff" }); this.audio.play("cryo"); if (this.theme.effects.shake) this._shake(4); }
+
+    _spawnPowerup() {
+      const specials = WEAPONS.filter(w => !w.base);
+      const locked = specials.filter(w => !this.dev && (this.ammo[w.id] || 0) <= 0);
+      const pool = locked.length ? locked : specials, w = pool[(Math.random() * pool.length) | 0];
+      const edge = (Math.random() * 4) | 0; let x, y;
+      if (edge === 0) { x = rand(0, this._w); y = -16; } else if (edge === 1) { x = this._w + 16; y = rand(0, this._h); }
+      else if (edge === 2) { x = rand(0, this._w); y = this._h + 16; } else { x = -16; y = rand(0, this._h); }
+      const dir = Math.atan2(this._h / 2 - y, this._w / 2 - x) + rand(-0.5, 0.5), sp = rand(30, 55);
+      this.powerups.push({ x: x, y: y, vx: Math.cos(dir) * sp, vy: Math.sin(dir) * sp, weapon: w.id, radius: 13, t: 0 });
+    }
+
+    _collectPowerup(pu) {
+      const w = WMAP[pu.weapon]; this.weapon = pu.weapon; this.ammo[pu.weapon] = (this.ammo[pu.weapon] || 0) + AMMO_GRANT;
+      this.audio.play("extralife"); this._toast(w.name + "  x" + (this.dev ? "∞" : this.ammo[pu.weapon]), true);
+      this._burst(pu.x, pu.y, w.color || this.theme.palette.accent, 22, 240);
+    }
+
+    _checkExtra() { if (this.score >= this.nextExtra) { this.lives++; this.nextExtra += 10000; this.audio.play("extralife"); this._toast("EXTRA SHIP!", true); } }
+
     _killShip() {
-      if (!this.ship.alive || this.ship.invuln > 0) return;
-      this.ship.alive = false;
-      this.audio.play("boom");
+      if (!this.ship.alive || this.ship.invuln > 0 || this.dev) return;
+      this.ship.alive = false; this.audio.play("boom");
       this._burst(this.ship.x, this.ship.y, this.theme.palette.ship, 26, 260);
       if (this.theme.effects.shake) this._shake(9);
       this.lives--;
-      if (this.lives < 0) { this.lives = 0; this._gameOver(); }
-      else this.respawnT = RESPAWN;
+      if (this.lives < 0) { this.lives = 0; this._gameOver(); } else this.respawnT = RESPAWN;
     }
 
     _gameOver() { if (this.state === "over") return; this.state = "over"; this.audio.stopMusic(); this.shell.requestGameOver({ score: this.score }); }
 
     _spawnUfo() {
-      const small = Math.random() < 0.35 && this.wave >= 3;
-      const fromLeft = Math.random() < 0.5;
-      this.ufo = { x: fromLeft ? -20 : this._w + 20, y: rand(this._h * 0.15, this._h * 0.85),
-        vx: (fromLeft ? 1 : -1) * rand(90, 140), vy: 0, radius: small ? 12 : 18, small: small,
-        fireCd: 1200, zig: 0 };
+      const small = Math.random() < 0.35 && this.wave >= 3, fromLeft = Math.random() < 0.5;
+      this.ufo = { x: fromLeft ? -20 : this._w + 20, y: rand(this._h * 0.15, this._h * 0.85), vx: (fromLeft ? 1 : -1) * rand(90, 140), vy: 0, radius: small ? 12 : 18, small: small, fireCd: 1200, zig: 0 };
       this.audio.play("ufo");
     }
-
     _ufoFire() {
       const u = this.ufo, s = this.ship;
-      let ang;
-      if (u.small) { ang = Math.atan2(s.y - u.y, s.x - u.x) + rand(-0.12, 0.12); }
-      else { ang = rand(0, Math.PI * 2); }
+      const ang = u.small ? Math.atan2(s.y - u.y, s.x - u.x) + rand(-0.12, 0.12) : rand(0, Math.PI * 2);
       this.enemyBullets.push({ x: u.x, y: u.y, vx: Math.cos(ang) * 300, vy: Math.sin(ang) * 300, life: 1.4 });
       this.audio.play("shoot");
     }
@@ -224,11 +262,11 @@
       if (this.shakeMag > 0) { this.shakeMag -= dt * 0.04; if (this.shakeMag < 0) this.shakeMag = 0; }
       this.particles.update(dt);
       for (let i = this.toasts.length - 1; i >= 0; i--) if (now - this.toasts[i].born > this.toasts[i].life) this.toasts.splice(i, 1);
+      for (let i = this.zaps.length - 1; i >= 0; i--) { this.zaps[i].life -= s; if (this.zaps[i].life <= 0) this.zaps.splice(i, 1); }
       if (this.state !== "playing") return;
 
       const I = this.shell.input, ship = this.ship;
       if (ship.invuln > 0) ship.invuln -= dt;
-
       if (ship.alive) {
         if (I.isDown("ArrowLeft")) ship.angle -= ROT * s;
         if (I.isDown("ArrowRight")) ship.angle += ROT * s;
@@ -237,89 +275,95 @@
           ship.vx += Math.cos(ship.angle) * THRUST * s; ship.vy += Math.sin(ship.angle) * THRUST * s;
           if (this.theme.effects.particles && Math.random() < 0.7) {
             const bx = ship.x - Math.cos(ship.angle) * ship.radius, by = ship.y - Math.sin(ship.angle) * ship.radius;
-            this.particles.emit({ x: bx, y: by, count: 1, colors: [this.theme.palette.thrust, "#ffffff"],
-              vx: -Math.cos(ship.angle) * 80, vy: -Math.sin(ship.angle) * 80, speedMin: 10, speedMax: 60,
-              sizeMin: 1.5, sizeMax: 3, lifeMin: 0.2, lifeMax: 0.5, glow: this.theme.effects.glow, shape: "square" });
+            this.particles.emit({ x: bx, y: by, count: 1, colors: [this.theme.palette.thrust, "#ffffff"], vx: -Math.cos(ship.angle) * 80, vy: -Math.sin(ship.angle) * 80, speedMin: 10, speedMax: 60, sizeMin: 1.5, sizeMax: 3, lifeMin: 0.2, lifeMax: 0.5, glow: this.theme.effects.glow, shape: "square" });
           }
         }
-        const sp = Math.hypot(ship.vx, ship.vy);
-        if (sp > MAXV) { ship.vx *= MAXV / sp; ship.vy *= MAXV / sp; }
+        const sp = Math.hypot(ship.vx, ship.vy); if (sp > MAXV) { ship.vx *= MAXV / sp; ship.vy *= MAXV / sp; }
         ship.vx *= (1 - DRAG * s); ship.vy *= (1 - DRAG * s);
         ship.x += ship.vx * s; ship.y += ship.vy * s; this._wrap(ship);
         this.fireCd -= dt;
-        if (I.isDown("Space") && this.fireCd <= 0) { this._fire(); this.fireCd = FIRE_CD; }
-      } else {
-        this.respawnT -= dt;
-        if (this.respawnT <= 0) this._respawnShip();
+        if (I.isDown("Space") && this.fireCd <= 0) { this._fire(); this.fireCd = WMAP[this.weapon].cd; }
+      } else { this.respawnT -= dt; if (this.respawnT <= 0) this._respawnShip(); }
+
+      // bullets (with homing steer + split/blackhole on expiry)
+      for (let i = this.bullets.length - 1; i >= 0; i--) {
+        const b = this.bullets[i];
+        if (b.homing) {
+          let tgt = null, bd = 1e9; for (const a of this.asteroids) { const d = Math.hypot(a.x - b.x, a.y - b.y); if (d < bd) { bd = d; tgt = a; } }
+          if (tgt) { let cur = Math.atan2(b.vy, b.vx); let diff = Math.atan2(tgt.y - b.y, tgt.x - b.x) - cur; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2; const mt = HOMING_TURN * s; cur += Math.max(-mt, Math.min(mt, diff)); const spd = Math.hypot(b.vx, b.vy) || 1; b.vx = Math.cos(cur) * spd; b.vy = Math.sin(cur) * spd; }
+        }
+        b.x += b.vx * s; b.y += b.vy * s; b.life -= s; this._wrap(b);
+        if (b.life <= 0) {
+          if (b.split) for (let k = 0; k < b.split; k++) { const a = (k / b.split) * Math.PI * 2; this.bullets.push({ x: b.x, y: b.y, vx: Math.cos(a) * 360, vy: Math.sin(a) * 360, life: 1.1, color: b.color, wid: "frag" }); }
+          if (b.blackhole) this._spawnBlackhole(b.x, b.y);
+          this.bullets.splice(i, 1);
+        }
+      }
+      for (let i = this.enemyBullets.length - 1; i >= 0; i--) { const b = this.enemyBullets[i]; b.x += b.vx * s; b.y += b.vy * s; b.life -= s; this._wrap(b); if (b.life <= 0) this.enemyBullets.splice(i, 1); }
+
+      // asteroids (slowed by cryo move slower)
+      for (const a of this.asteroids) { const f = a.slow > 0 ? AST_SLOW : 1; if (a.slow > 0) a.slow -= s; a.x += a.vx * f * s; a.y += a.vy * f * s; a.angle += a.spin * f * s; this._wrap(a); }
+
+      // powerups
+      this.powerupTimer -= dt;
+      if (this.powerupTimer <= 0 && this.powerups.length < 2) { this._spawnPowerup(); this.powerupTimer = rand(15000, 26000); }
+      for (let i = this.powerups.length - 1; i >= 0; i--) { const pu = this.powerups[i]; pu.x += pu.vx * s; pu.y += pu.vy * s; pu.t += dt; this._wrap(pu); }
+
+      // black holes pull asteroids in, then implode
+      for (let i = this.blackholes.length - 1; i >= 0; i--) {
+        const bh = this.blackholes[i]; bh.t += s;
+        for (const a of this.asteroids) { const dx = bh.x - a.x, dy = bh.y - a.y, d = Math.hypot(dx, dy) || 1; if (d < bh.range) { const fp = BH_PULL * (1 - d / bh.range); a.x += dx / d * fp * s; a.y += dy / d * fp * s; } }
+        if (bh.t >= bh.dur) { for (let j = this.asteroids.length - 1; j >= 0; j--) { const a = this.asteroids[j]; if (Math.hypot(a.x - bh.x, a.y - bh.y) < bh.range * 0.75) { this.asteroids.splice(j, 1); this._explodeAsteroid(a); } } this._burst(bh.x, bh.y, bh.color, 30, 320); if (this.theme.effects.shake) this._shake(8); this.blackholes.splice(i, 1); }
       }
 
-      // bullets
-      for (let i = this.bullets.length - 1; i >= 0; i--) {
-        const b = this.bullets[i]; b.x += b.vx * s; b.y += b.vy * s; b.life -= s; this._wrap(b);
-        if (b.life <= 0) this.bullets.splice(i, 1);
-      }
-      for (let i = this.enemyBullets.length - 1; i >= 0; i--) {
-        const b = this.enemyBullets[i]; b.x += b.vx * s; b.y += b.vy * s; b.life -= s; this._wrap(b);
-        if (b.life <= 0) this.enemyBullets.splice(i, 1);
-      }
-      // asteroids
-      for (const a of this.asteroids) { a.x += a.vx * s; a.y += a.vy * s; a.angle += a.spin * s; this._wrap(a); }
       // ufo
       this.ufoTimer -= dt;
       if (!this.ufo && this.ufoTimer <= 0 && this.asteroids.length > 0 && this.wave >= 2) { this._spawnUfo(); this.ufoTimer = rand(16000, 28000); }
-      if (this.ufo) {
-        const u = this.ufo; u.zig += s; u.x += u.vx * s; u.y += Math.sin(u.zig * 2.2) * 40 * s;
-        u.fireCd -= dt; if (u.fireCd <= 0 && ship.alive) { this._ufoFire(); u.fireCd = u.small ? 900 : 1400; }
-        if (u.x < -40 || u.x > this._w + 40) this.ufo = null;
-      }
+      if (this.ufo) { const u = this.ufo; u.zig += s; u.x += u.vx * s; u.y += Math.sin(u.zig * 2.2) * 40 * s; u.fireCd -= dt; if (u.fireCd <= 0 && ship.alive) { this._ufoFire(); u.fireCd = u.small ? 900 : 1400; } if (u.x < -40 || u.x > this._w + 40) this.ufo = null; }
 
       this._collisions();
-
       if (this.asteroids.length === 0 && !this.ufo) this._nextWave();
     }
 
     _collisions() {
       const ast = this.asteroids;
-      // bullets vs asteroids
+      // bullets vs asteroids (with weapon effects)
       for (let i = this.bullets.length - 1; i >= 0; i--) {
         const b = this.bullets[i];
         for (let j = ast.length - 1; j >= 0; j--) {
           const a = ast[j];
           if (Math.hypot(a.x - b.x, a.y - b.y) < a.radius) {
-            this.bullets.splice(i, 1); ast.splice(j, 1); this._explodeAsteroid(a); break;
+            if (b.blast) { this._nuke(b.x, b.y, b.blast); this.bullets.splice(i, 1); break; }
+            if (b.blackhole) { this._spawnBlackhole(b.x, b.y); this.bullets.splice(i, 1); break; }
+            if (b.chain) { this._chainZap(a.x, a.y, b.color, b.chain); this.bullets.splice(i, 1); break; }
+            if (b.freeze) { for (const o of ast) if (Math.hypot(o.x - a.x, o.y - a.y) < 90) o.slow = Math.max(o.slow || 0, b.freeze); }
+            if (b.split) for (let k = 0; k < b.split; k++) { const ang = (k / b.split) * Math.PI * 2; this.bullets.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 360, vy: Math.sin(ang) * 360, life: 1.0, color: b.color, wid: "frag" }); }
+            ast.splice(j, 1); this._explodeAsteroid(a); this.bullets.splice(i, 1); break;
           }
         }
       }
       // bullets vs ufo
-      if (this.ufo) {
-        for (let i = this.bullets.length - 1; i >= 0; i--) {
-          const b = this.bullets[i];
-          if (Math.hypot(this.ufo.x - b.x, this.ufo.y - b.y) < this.ufo.radius + 3) {
-            this.bullets.splice(i, 1);
-            this.score += this.ufo.small ? UFO_SCORE.small : UFO_SCORE.big; this._checkExtra();
-            this.audio.play("boom"); this._burst(this.ufo.x, this.ufo.y, this.theme.palette.ufo, 24, 280);
-            if (this.theme.effects.shake) this._shake(6);
-            this._toast("+" + (this.ufo.small ? UFO_SCORE.small : UFO_SCORE.big));
-            this.ufo = null; break;
-          }
+      if (this.ufo) for (let i = this.bullets.length - 1; i >= 0; i--) {
+        const b = this.bullets[i];
+        if (Math.hypot(this.ufo.x - b.x, this.ufo.y - b.y) < this.ufo.radius + 3) {
+          this.bullets.splice(i, 1); this.score += this.ufo.small ? UFO_SCORE.small : UFO_SCORE.big; this._checkExtra();
+          this.audio.play("boom"); this._burst(this.ufo.x, this.ufo.y, this.theme.palette.ufo, 24, 280);
+          if (this.theme.effects.shake) this._shake(6); this._toast("+" + (this.ufo.small ? UFO_SCORE.small : UFO_SCORE.big)); this.ufo = null; break;
         }
       }
+      // bullets vs powerups (shoot to collect)
+      for (let i = this.bullets.length - 1; i >= 0; i--) { const b = this.bullets[i]; for (let j = this.powerups.length - 1; j >= 0; j--) { const pu = this.powerups[j]; if (Math.hypot(pu.x - b.x, pu.y - b.y) < pu.radius + 4) { this.powerups.splice(j, 1); this._collectPowerup(pu); this.bullets.splice(i, 1); break; } } }
+
       if (!this.ship.alive || this.ship.invuln > 0) return;
       const ship = this.ship;
-      for (let j = ast.length - 1; j >= 0; j--) {
-        const a = ast[j];
-        if (Math.hypot(a.x - ship.x, a.y - ship.y) < a.radius + ship.radius * 0.7) { this._killShip(); return; }
-      }
+      // ship collects powerups by flying into them
+      for (let j = this.powerups.length - 1; j >= 0; j--) { const pu = this.powerups[j]; if (Math.hypot(pu.x - ship.x, pu.y - ship.y) < pu.radius + ship.radius) { this.powerups.splice(j, 1); this._collectPowerup(pu); } }
+      for (let j = ast.length - 1; j >= 0; j--) { const a = ast[j]; if (Math.hypot(a.x - ship.x, a.y - ship.y) < a.radius + ship.radius * 0.7) { this._killShip(); return; } }
       if (this.ufo && Math.hypot(this.ufo.x - ship.x, this.ufo.y - ship.y) < this.ufo.radius + ship.radius * 0.7) { this._killShip(); return; }
-      for (let i = this.enemyBullets.length - 1; i >= 0; i--) {
-        const b = this.enemyBullets[i];
-        if (Math.hypot(b.x - ship.x, b.y - ship.y) < ship.radius * 0.8) { this.enemyBullets.splice(i, 1); this._killShip(); return; }
-      }
+      for (let i = this.enemyBullets.length - 1; i >= 0; i--) { const b = this.enemyBullets[i]; if (Math.hypot(b.x - ship.x, b.y - ship.y) < ship.radius * 0.8) { this.enemyBullets.splice(i, 1); this._killShip(); return; } }
     }
 
     // ---------------- render ----------------
-    // Keep the play/wrap field above the touch-control bar (inset); the
-    // renderer still fills the full canvas for the background/starfield.
     resize(w, h, inset) { this._w = w; this._h = Math.max(120, h - (inset || 0)); this.renderer.resize(w, h); }
 
     render(now) {
@@ -328,14 +372,18 @@
       let sx = 0, sy = 0;
       if (this.shakeMag > 0.1) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
       ctx.save(); ctx.translate(sx, sy);
+      for (const bh of this.blackholes) R.drawBlackhole(ctx, th, bh);
       for (const a of this.asteroids) R.drawAsteroid(ctx, a, th);
       for (const b of this.bullets) R.drawBullet(ctx, b, th);
       for (const b of this.enemyBullets) R.drawBullet(ctx, b, th);
+      for (const pu of this.powerups) R.drawPowerup(ctx, th, pu, now, WMAP[pu.weapon]);
       if (this.ufo) R.drawUfo(ctx, this.ufo, th);
+      for (const z of this.zaps) R.drawZap(ctx, th, z);
       if (this.ship.alive) R.drawShip(ctx, this.ship, th, now, this.ship.invuln > 0 && (Math.floor(now / 120) % 2 === 0));
       this.particles.render(ctx);
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, lives: this.lives, wave: this.wave });
+      R.drawWeaponTag(ctx, th, WMAP[this.weapon], this.dev ? "∞" : (WMAP[this.weapon].base ? "∞" : (this.ammo[this.weapon] || 0)), this.dev);
       this._renderToasts(ctx, R, th, now);
       R.drawScanlines(ctx, th);
     }
@@ -344,13 +392,10 @@
       if (!this.toasts.length) return;
       ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
       for (let i = 0; i < this.toasts.length; i++) {
-        const t = this.toasts[i], pr = (now - t.born) / t.life;
-        const alpha = pr < 0.15 ? pr / 0.15 : (1 - (pr - 0.15) / 0.85);
-        ctx.globalAlpha = Math.max(0, alpha);
-        ctx.font = "800 " + (t.big ? 30 : 18) + "px " + th.fonts.ui;
+        const t = this.toasts[i], pr = (now - t.born) / t.life, alpha = pr < 0.15 ? pr / 0.15 : (1 - (pr - 0.15) / 0.85);
+        ctx.globalAlpha = Math.max(0, alpha); ctx.font = "800 " + (t.big ? 30 : 18) + "px " + th.fonts.ui;
         if (th.effects.glow) { ctx.shadowBlur = 14; ctx.shadowColor = th.palette.accent; }
-        ctx.fillStyle = th.palette.accent;
-        ctx.fillText(t.text, this._w / 2, this._h * 0.3 - pr * 20 + i * 30);
+        ctx.fillStyle = th.palette.accent; ctx.fillText(t.text, this._w / 2, this._h * 0.3 - pr * 20 + i * 30);
       }
       ctx.restore();
     }

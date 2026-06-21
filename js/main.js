@@ -18,6 +18,7 @@
       backBtn: $("backBtn"),
       themeBtn: $("themeBtn"),
       musicBtn: $("musicBtn"),
+      devBtn: $("devBtn"),
       soundBtn: $("soundBtn"),
       pauseOverlay: $("pauseOverlay"),
       gameoverOverlay: $("gameoverOverlay"),

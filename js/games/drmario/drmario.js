@@ -91,6 +91,7 @@
       this.renderer = new D.Renderer(CONFIG);
       this.theme = D.getTheme(ctx.storage.get("drmario:theme", "modern"));
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("drmario:song", 0) | 0));
+      this.dev = false;
       this._unsub = [];
       this.paused = false;
       this.state = "playing";
@@ -137,6 +138,7 @@
       this._toast("♪ " + name, this.theme.palette.accent);
       return name;
     }
+    toggleDev() { this.dev = !this.dev; this._toast(this.dev ? "DEV: drop paused" : "DEV OFF", this.theme.palette.accent, true); return this.dev; }
 
     cycleTheme() {
       const list = D.Themes;
@@ -494,7 +496,7 @@
         this.lockTimer += dt;
         if (this.lockTimer >= LOCK_DELAY) this._lock();
       } else {
-        const interval = this.softDropping ? Math.min(this.dropMs, 45) : this.dropMs;
+        const interval = this.softDropping ? Math.min(this.dropMs, 45) : (this.dev ? 100000 : this.dropMs);
         this.dropTimer += dt;
         let guard = 0;
         while (this.dropTimer >= interval && guard < 40) {

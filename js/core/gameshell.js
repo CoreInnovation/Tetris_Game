@@ -124,6 +124,7 @@
       this._hide(this.refs.backBtn);
       this._hide(this.refs.themeBtn);
       this._hide(this.refs.musicBtn);
+      this._hide(this.refs.devBtn);
       this._hide(this.refs.touchControls);
       this._show(this.refs.menu);
       this._buildMenu(); // refresh high scores
@@ -150,6 +151,9 @@
       else this._hide(this.refs.themeBtn);
       if (typeof this._game.cycleMusic === "function") this._show(this.refs.musicBtn);
       else this._hide(this.refs.musicBtn);
+      if (typeof this._game.toggleDev === "function") this._show(this.refs.devBtn);
+      else this._hide(this.refs.devBtn);
+      this._updateDevIcon();
 
       // Touch buttons: shown for games that use them; pointer-driven games opt out.
       if (this.isTouch && !this._game.pointerInput) { this._applyTouchLabels(this._game); this._show(this.refs.touchControls); }
@@ -239,6 +243,15 @@
       if (this._game && this._game.cycleMusic) return this._game.cycleMusic();
     }
 
+    toggleDev() {
+      if (this._game && this._game.toggleDev) { this._game.toggleDev(); this._updateDevIcon(); }
+    }
+    _updateDevIcon() {
+      const on = !!(this._game && this._game.dev);
+      this.refs.devBtn.style.background = on ? "rgba(90,209,255,0.30)" : "";
+      this.refs.devBtn.style.borderColor = on ? "var(--accent)" : "";
+    }
+
     // ---------------- DOM wiring ----------------
     _wireChrome() {
       this.refs.backBtn.addEventListener("click", () => this.showMenu());
@@ -250,6 +263,7 @@
       });
       this.refs.themeBtn.addEventListener("click", () => this.cycleTheme());
       this.refs.musicBtn.addEventListener("click", () => { this.audio.unlock(); this.cycleMusic(); });
+      this.refs.devBtn.addEventListener("click", () => this.toggleDev());
     }
 
     _wireOverlays() {
