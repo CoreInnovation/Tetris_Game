@@ -71,6 +71,7 @@
 
     drawInterceptor(ctx, theme, it) {
       if (it.mode === "arc") { this._arcShell(ctx, theme, it); return; }
+      if (it.mode === "eject" || it.mode === "burn") { this._rocket(ctx, theme, it); return; }
       if (it.mode === "home") { this._hornet(ctx, theme, it); return; }
       if (it.weapon === "missile" || theme.missileStyle === "rocket") { this._rocket(ctx, theme, it); return; }
       const p = theme.palette, col = it.color || p.interceptor;
@@ -220,6 +221,14 @@
       ctx.shadowBlur = 0; ctx.font = "600 13px " + theme.fonts.ui; ctx.fillStyle = p.textDim;
       ctx.textAlign = "right";
       ctx.fillText("WAVE " + data.wave + "   CITIES " + data.cities, this.w - 18, 18);
+      if (data.mult > 1) {   // active multi-fire badge + countdown bar, centered in the clear top strip
+        const gold = "#ffd24a", cx = this.w / 2;
+        this._glow(ctx, theme, gold, theme.effects.glow ? 8 : 0);
+        ctx.fillStyle = gold; ctx.font = "900 15px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "top";
+        ctx.fillText("×" + data.mult + " MULTI-FIRE", cx, 12); ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(cx - 65, 31, 130, 4);
+        ctx.fillStyle = gold; ctx.fillRect(cx - 65, 31, 130 * Math.max(0, Math.min(1, data.multFrac)), 4);
+      }
       ctx.restore();
     }
 
@@ -237,6 +246,7 @@
       else if (id === "hornets") { for (let i = -1; i <= 1; i++) { const ox = cx + i * r * 0.55; ctx.beginPath(); ctx.moveTo(ox - r * 0.22, cy + r * 0.3); ctx.lineTo(ox, cy - r * 0.2); ctx.lineTo(ox + r * 0.22, cy + r * 0.3); ctx.stroke(); } }
       else if (id === "tesla") { ctx.beginPath(); ctx.moveTo(cx + r * 0.3, cy - r); ctx.lineTo(cx - r * 0.25, cy - r * 0.05); ctx.lineTo(cx + r * 0.15, cy - r * 0.05); ctx.lineTo(cx - r * 0.35, cy + r); ctx.stroke(); }
       else if (id === "singularity") { ctx.beginPath(); ctx.arc(cx, cy, r * 0.72, 0, 6.2832); ctx.stroke(); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, r * 0.28, 0, 6.2832); ctx.fill(); }
+      else if (id === "seeker") { ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 0.4, cy + r * 0.18); ctx.lineTo(cx - r * 0.4, cy + r * 0.18); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.arc(cx, cy + r * 0.58, r * 0.28, 0, 6.2832); ctx.stroke(); }
       ctx.restore();
     }
 
@@ -247,8 +257,9 @@
         ctx.save();
         ctx.globalAlpha = c.locked ? 0.42 : 1;
         ctx.fillStyle = "rgba(10,14,22,0.72)"; rr(ctx, r.x, r.y, r.w, r.h, 6); ctx.fill();
-        ctx.lineWidth = c.active ? 2.2 : 1;
-        ctx.strokeStyle = c.active ? (c.overheated ? p.enemy : p.accent) : rgba(p.textDim, 0.5);
+        if (c.cooling) { ctx.fillStyle = "rgba(255,72,72,0.18)"; rr(ctx, r.x, r.y, r.w, r.h, 6); ctx.fill(); }   // unmistakable "this weapon is cooling" tint
+        ctx.lineWidth = c.cooling ? 2.2 : (c.active ? 2.2 : 1);
+        ctx.strokeStyle = c.cooling ? p.enemy : (c.active ? p.accent : rgba(p.textDim, 0.5));
         rr(ctx, r.x, r.y, r.w, r.h, 6); ctx.stroke();
         ctx.globalAlpha = 1;
         if (c.locked) {
@@ -262,14 +273,14 @@
           ctx.fillText(String(c.keyNum), r.x + r.w - 6, r.y + 8);
           const bw = r.w - 10, bx = r.x + 5, byb = r.y + r.h - 6;
           ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(bx, byb, bw, 3);
-          ctx.fillStyle = c.overheated ? p.enemy : (c.heat > 0.7 ? "#ffb43a" : col);
-          ctx.fillRect(bx, byb, bw * Math.min(1, c.heat), 3);
-          if (c.active) {
+          if (c.cooling) { ctx.fillStyle = p.enemy; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.cdFrac)), 3); }
+          else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.heatFrac)), 3); }
+          if (c.active && !c.cooling) {
             ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(bx, byb - 4, bw, 2);
             ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7);
             ctx.fillRect(bx, byb - 4, bw * Math.max(0, Math.min(1, c.reloadFrac)), 2);
           }
-          if (c.overheated) { ctx.fillStyle = p.enemy; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + 6); }
+          if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + 6); }
         }
         ctx.restore();
       }
@@ -277,6 +288,17 @@
 
     drawPowerup(ctx, theme, pu, now, weapon) {
       const p = theme.palette, r = pu.radius, pulse = 0.7 + 0.3 * Math.sin(now / 120);
+      if (pu.kind === "mult") {   // gold ×N multi-fire pod
+        const gold = "#ffd24a";
+        ctx.save(); ctx.translate(pu.x, pu.y);
+        this._glow(ctx, theme, gold, theme.effects.glow ? 18 : 0);
+        ctx.strokeStyle = gold; ctx.lineWidth = 2; ctx.fillStyle = rgba(gold, 0.2 * pulse);
+        ctx.beginPath(); ctx.moveTo(0, -r * 1.3); ctx.lineTo(r, 0); ctx.lineTo(0, r * 1.3); ctx.lineTo(-r, 0); ctx.closePath();
+        ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
+        ctx.fillStyle = "#fff7e0"; ctx.font = "900 " + Math.round(r * 1.25) + "px " + theme.fonts.ui;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("×" + pu.mult, 0, 1);
+        ctx.restore(); return;
+      }
       const col = (weapon && weapon.color) || p.powerup;
       ctx.save();
       ctx.translate(pu.x, pu.y);
