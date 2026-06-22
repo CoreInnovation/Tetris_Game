@@ -23,7 +23,7 @@
   const WEAPONS = [
     { id: "interceptor", name: "INTERCEPTOR", short: "INT", kind: "direct", speed: 640, blast: 60, base: true, minWave: 1, sfx: "launch", color: null },
     { id: "artillery", name: "ARTILLERY", short: "ART", kind: "arc", speed: 1150, blast: 74, minWave: 2, sfx: "artillery", color: "#ff9a3a" },
-    { id: "railgun", name: "RAIL GUN", short: "RAIL", kind: "direct", speed: 2600, blast: 22, minWave: 3, sfx: "rail", color: "#7afcff" },
+    { id: "railgun", name: "RAIL GUN", short: "RAIL", kind: "direct", speed: 2600, blast: 44, minWave: 3, sfx: "rail", color: "#7afcff" },
     { id: "missile", name: "WARHEAD", short: "WAR", kind: "cold", speed: 320, blast: 170, minWave: 3, sfx: "eject", color: null },
     { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 95, slow: 3.5, minWave: 4, sfx: "cryo", color: "#8fd9ff" },
     { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 92, minWave: 4, sfx: "launch", color: "#ffe14d" },
@@ -378,7 +378,7 @@
 
     // build a projectile carrying the active weapon's payload flags
     _proj(w, bx, by, tx, ty, extra) {
-      const base = { bx: bx, by: by, x: bx, y: by, tx: tx, ty: ty, weapon: w.id, blast: w.blast,
+      const base = { bx: bx, by: by, x: bx, y: by, tx: tx, ty: ty, weapon: w.id, blast: w.blast * (w.id === "railgun" ? (1 + Math.min(0.6, this.wave * 0.02)) : 1),
         color: w.color, cluster: w.cluster || 0, slow: w.slow || 0, chain: w.chain || 0, blackhole: !!w.blackhole,
         fire: !!w.fire, fireR: w.fireR || 0, fireDur: w.fireDur || 0 };
       return Object.assign(base, extra || {});
@@ -426,10 +426,10 @@
           sizeMin: 2, sizeMax: 4.5, lifeMin: 0.3, lifeMax: 0.8, glow: false, shape: "circle" });
       } else if (w.kind === "arc") {
         const dx = tx - bx, dy = ty - by, dist = Math.hypot(dx, dy) || 1;
-        let nx = -dy / dist, ny = dx / dist; if (ny > 0) { nx = -nx; ny = -ny; }
         const bow = Math.max(45, Math.min(150, dist * 0.34));
+        const side = Math.random() < 0.5 ? -1 : 1;   // arc randomly bows LEFT or RIGHT, just for fun
         this.interceptors.push(this._proj(w, bx, by, tx, ty, { mode: "arc",
-          p1x: (bx + tx) / 2 + nx * bow, p1y: (by + ty) / 2 + ny * bow, t: 0, dur: Math.max(0.3, dist / w.speed) }));
+          p1x: (bx + tx) / 2 + side * bow, p1y: (by + ty) / 2 - bow * 0.7, t: 0, dur: Math.max(0.3, dist / w.speed) }));
         this._muzzle(bx, by, w);
       } else if (w.kind === "swarm") {
         const n = w.pellets || 4;
