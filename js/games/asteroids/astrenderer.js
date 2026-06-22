@@ -166,7 +166,7 @@
       ctx.restore();
     }
 
-    drawTouchControls(ctx, theme, stick, firing, w, h) {
+    drawTouchControls(ctx, theme, stick, firing, w, h, profile, sbase) {
       const p = theme.palette;
       ctx.save();
       // fire button, bottom-right
@@ -175,7 +175,14 @@
       ctx.beginPath(); ctx.arc(fx, fy, fr, 0, 6.2832); ctx.fill();
       ctx.globalAlpha = 0.9; ctx.fillStyle = "#fff"; ctx.font = "800 15px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("FIRE", fx, fy);
-      // floating thumbstick base + knob when active
+      // static profile: show the pinned base + a ⊕ move handle even when idle
+      if (profile === "static" && sbase && !(stick && stick.active)) {
+        ctx.lineWidth = 2; ctx.strokeStyle = p.accent;
+        ctx.globalAlpha = 0.12; ctx.beginPath(); ctx.arc(sbase.x, sbase.y, 70, 0, 6.2832); ctx.stroke();
+        ctx.globalAlpha = 0.5; ctx.fillStyle = p.accent; ctx.font = "700 18px " + theme.fonts.ui;
+        ctx.fillText("⊕", sbase.x, sbase.y);
+      }
+      // thumbstick base + knob when active
       if (stick && stick.active) {
         ctx.lineWidth = 2; ctx.strokeStyle = p.accent; ctx.fillStyle = p.accent;
         ctx.globalAlpha = 0.16; ctx.beginPath(); ctx.arc(stick.baseX, stick.baseY, 70, 0, 6.2832); ctx.fill();

@@ -72,9 +72,13 @@
       this.renderer = new A.Renderer();
       this.theme = A.getTheme(ctx.storage.get("asteroids:theme", "modern"));
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("asteroids:song", 0) | 0));
-      this.pointerInput = true;   // custom floating thumbstick + fire button instead of the shared touch bar
-      this.stick = { active: false, id: null, baseX: 0, baseY: 0, kx: 0, ky: 0, dx: 0, dy: 0, mag: 0 };
-      this.firing = false; this.fireId = null;
+      this.pointerInput = true;   // custom thumbstick + fire button instead of the shared touch bar
+      this.ctrlProfile = ctx.storage.get("asteroids:ctrl", "float");   // "float" | "static"
+      this.tapFire = ctx.storage.get("asteroids:tapfire", true);       // quick-tap in the stick zone fires (one-thumb play)
+      const sb = ctx.storage.get("asteroids:stick", null);
+      this.stickBase = sb ? { x: sb.x, y: sb.y, set: true } : { x: 0, y: 0, set: false };
+      this.stick = { active: false, pending: false, reposition: false, id: null, baseX: 0, baseY: 0, kx: 0, ky: 0, dx: 0, dy: 0, mag: 0, sx: 0, sy: 0, t0: 0 };
+      this.firing = false; this.fireId = null; this._fireReq = false;
       this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600; this._cssW = 800; this._cssH = 600; this.zoom = 1;
@@ -100,7 +104,23 @@
     }
 
     // drop any held thumbstick/fire so it can't "stick on" across pause / game-over / restart
-    _clearTouchState() { this.stick.active = false; this.stick.id = null; this.stick.mag = 0; this.firing = false; this.fireId = null; }
+    _clearTouchState() { this.stick.active = false; this.stick.pending = false; this.stick.reposition = false; this.stick.id = null; this.stick.mag = 0; this.firing = false; this.fireId = null; this._fireReq = false; }
+    _staticBase() { return (this.stickBase && this.stickBase.set) ? this.stickBase : { x: this._cssW * 0.22, y: this._cssH * 0.74 }; }
+    _onStickHandle(p) { const b = this._staticBase(); return Math.hypot(p.x - b.x, p.y - b.y) < 26; }
+
+    menus() {
+      const self = this, SG = A.SONGS;
+      return {
+        control: {
+          profiles: [{ id: "float", name: "Floating stick" }, { id: "static", name: "Static stick (drag ⊕ to place)" }],
+          profile: this.ctrlProfile,
+          setProfile: (id) => { self.ctrlProfile = id; self.shell.storage.set("asteroids:ctrl", id); self._clearTouchState(); },
+          toggles: [{ id: "tap", name: "Tap to fire (one thumb)", on: this.tapFire, set: (v) => { self.tapFire = v; self.shell.storage.set("asteroids:tapfire", v); } }]
+        },
+        music: { options: SG.map(s => ({ id: s.id, name: s.name })), current: SG[this.songIdx].id, set: (id) => { const i = SG.findIndex(s => s.id === id); if (i >= 0) { self.songIdx = i; self.shell.storage.set("asteroids:song", i); self._applyMusic(); self._toast("♪ " + SG[i].name); } } },
+        skin: { options: A.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = A.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("asteroids:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
+      };
+    }
 
     pause() { this.paused = true; this._clearTouchState(); this.audio.suspendMusic(); }
     resume() { this.paused = false; this.audio.resumeMusic(); this._applyTempo(); }
@@ -141,36 +161,51 @@
       if (this.shell.isTouch) this._bindTouch();
     }
 
-    // Floating "anywhere" thumbstick on the left, fire on the right. The stick base follows the finger when
-    // it's dragged past STICK_MAX, so you can re-aim from anywhere and reverse direction instantly.
+    // Thumbstick (left) + fire (right). FLOAT profile: the base spawns where you touch and follows your finger.
+    // STATIC profile: the base is pinned (drag the ⊕ to move it). TAP-FIRE toggle: a quick tap in the stick zone
+    // fires; holding & sliding steers — so one thumb can both fly and shoot. The fire button always works too.
     _bindTouch() {
-      const canvas = this.shell.canvas, STICK_MAX = 70;
+      const canvas = this.shell.canvas, STICK_MAX = 70, TAP_MOVE = 16, TAP_MS = 200;
       const toLocal = (t) => { const r = canvas.getBoundingClientRect(); return { x: (t.clientX - r.left) * (this._cssW / r.width), y: (t.clientY - r.top) * (this._cssH / r.height) }; };
+      const s = this.stick;
       const onStart = (e) => {
         if (this.paused || this.state !== "playing") return;
         e.preventDefault();
         for (const t of e.changedTouches) {
           const p = toLocal(t);
-          if (p.x > this._cssW * 0.6) { if (this.fireId == null) { this.firing = true; this.fireId = t.identifier; } }
-          else if (!this.stick.active) { this.stick.active = true; this.stick.id = t.identifier; this.stick.baseX = p.x; this.stick.baseY = p.y; this.stick.kx = p.x; this.stick.ky = p.y; this.stick.dx = 0; this.stick.dy = 0; this.stick.mag = 0; }
+          if (p.x > this._cssW * 0.6) { if (this.fireId == null) { this.firing = true; this.fireId = t.identifier; } continue; }
+          if (s.active || s.pending || s.reposition || s.id != null) continue;   // single stick finger
+          if (this.ctrlProfile === "static" && this._onStickHandle(p)) { s.reposition = true; s.id = t.identifier; continue; }   // grab ⊕ to move it
+          s.pending = true; s.id = t.identifier; s.sx = p.x; s.sy = p.y; s.t0 = this._now;
+          const base = (this.ctrlProfile === "static") ? this._staticBase() : { x: p.x, y: p.y };
+          s.baseX = base.x; s.baseY = base.y; s.kx = p.x; s.ky = p.y; s.dx = 0; s.dy = 0; s.mag = 0;
         }
       };
       const onMove = (e) => {
-        if (!this.stick.active) return;
+        if (s.id == null) return;
         e.preventDefault();
         for (const t of e.changedTouches) {
-          if (t.identifier !== this.stick.id) continue;
+          if (t.identifier !== s.id) continue;
           const p = toLocal(t);
-          let vx = p.x - this.stick.baseX, vy = p.y - this.stick.baseY, d = Math.hypot(vx, vy);
-          if (d > STICK_MAX) { const nx = vx / d, ny = vy / d; this.stick.baseX = p.x - nx * STICK_MAX; this.stick.baseY = p.y - ny * STICK_MAX; vx = nx * STICK_MAX; vy = ny * STICK_MAX; d = STICK_MAX; }
-          this.stick.kx = this.stick.baseX + vx; this.stick.ky = this.stick.baseY + vy;
-          if (d > 0.001) { this.stick.dx = vx / d; this.stick.dy = vy / d; } else { this.stick.dx = 0; this.stick.dy = 0; }
-          this.stick.mag = Math.min(1, d / STICK_MAX);
+          if (s.reposition) { this.stickBase = { x: p.x, y: p.y, set: true }; continue; }
+          if (s.pending) {
+            if (Math.hypot(p.x - s.sx, p.y - s.sy) > TAP_MOVE || (this._now - s.t0) > TAP_MS) { s.pending = false; s.active = true; }
+            else continue;   // still might be a quick tap
+          }
+          let vx = p.x - s.baseX, vy = p.y - s.baseY, d = Math.hypot(vx, vy);
+          if (d > STICK_MAX) { const nx = vx / d, ny = vy / d; if (this.ctrlProfile === "float") { s.baseX = p.x - nx * STICK_MAX; s.baseY = p.y - ny * STICK_MAX; } vx = nx * STICK_MAX; vy = ny * STICK_MAX; d = STICK_MAX; }
+          s.kx = s.baseX + vx; s.ky = s.baseY + vy;
+          if (d > 0.001) { s.dx = vx / d; s.dy = vy / d; } else { s.dx = 0; s.dy = 0; }
+          s.mag = Math.min(1, d / STICK_MAX);
         }
       };
       const onEnd = (e) => {
         for (const t of e.changedTouches) {
-          if (t.identifier === this.stick.id) { this.stick.active = false; this.stick.id = null; this.stick.mag = 0; }
+          if (t.identifier === s.id) {
+            if (s.reposition) this.shell.storage.set("asteroids:stick", { x: this._staticBase().x, y: this._staticBase().y });
+            else if (s.pending && this.tapFire) this._fireReq = true;   // quick tap -> fire
+            s.active = false; s.pending = false; s.reposition = false; s.id = null; s.mag = 0;
+          }
           if (t.identifier === this.fireId) { this.firing = false; this.fireId = null; }
         }
       };
@@ -350,7 +385,8 @@
         ship.vx *= (1 - DRAG * s); ship.vy *= (1 - DRAG * s);
         ship.x += ship.vx * s; ship.y += ship.vy * s; this._wrap(ship);
         this.fireCd -= dt;
-        if ((I.isDown("Space") || this.firing) && this.fireCd <= 0) { this._fire(); this.fireCd = WMAP[this.weapon].cd; }
+        if ((I.isDown("Space") || this.firing || this._fireReq) && this.fireCd <= 0) { this._fire(); this.fireCd = WMAP[this.weapon].cd; }
+        this._fireReq = false;
       } else { this.respawnT -= dt; if (this.respawnT <= 0) this._respawnShip(); }
 
       // bullets (with homing steer + split/blackhole on expiry)
@@ -457,7 +493,7 @@
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, lives: this.lives, wave: this.wave });
       R.drawWeaponTag(ctx, th, WMAP[this.weapon], this.dev ? "∞" : (WMAP[this.weapon].base ? "∞" : (this.ammo[this.weapon] || 0)), this.dev);
-      if (this.shell.isTouch) R.drawTouchControls(ctx, th, this.stick, this.firing, this._cssW, this._cssH);
+      if (this.shell.isTouch) R.drawTouchControls(ctx, th, this.stick, this.firing, this._cssW, this._cssH, this.ctrlProfile, this._staticBase());
       this._renderToasts(ctx, R, th, now);
       R.drawScanlines(ctx, th);
     }

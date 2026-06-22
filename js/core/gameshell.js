@@ -126,6 +126,8 @@
       this._hide(this.refs.gameView);
       this._hide(this.refs.backBtn);
       this._hide(this.refs.pauseBtn);
+      this._hide(this.refs.controlBtn);
+      this._hide(this.refs.chooserOverlay);
       this._hide(this.refs.themeBtn);
       this._hide(this.refs.musicBtn);
       this._hide(this.refs.devBtn);
@@ -158,6 +160,8 @@
       else this._hide(this.refs.musicBtn);
       if (typeof this._game.toggleDev === "function") this._show(this.refs.devBtn);
       else this._hide(this.refs.devBtn);
+      const menus0 = (typeof this._game.menus === "function") ? this._game.menus() : null;
+      if (menus0 && menus0.control) this._show(this.refs.controlBtn); else this._hide(this.refs.controlBtn);
       this._updateDevIcon();
 
       // Touch buttons: shown for games that use them; pointer-driven games opt out.
@@ -264,18 +268,40 @@
       this.refs.devBtn.style.borderColor = on ? "var(--accent)" : "";
     }
 
+    // ---------------- options chooser (controls / music / skin modals) ----------------
+    _gameMenus() { return (this._game && typeof this._game.menus === "function") ? this._game.menus() : null; }
+
+    _openChooser(kind) { this.audio.unlock(); this._chooserKind = kind; this._renderChooser(); this._show(this.refs.chooserOverlay); }
+    _closeChooser() { this._hide(this.refs.chooserOverlay); }
+    _renderChooser() {
+      const menus = this._gameMenus(); if (!menus) return this._closeChooser();
+      const kind = this._chooserKind, body = this.refs.chooserBody;
+      this.refs.chooserTitle.textContent = { control: "Controls", music: "Music", skin: "Skin" }[kind] || "Options";
+      body.innerHTML = "";
+      const label = (t) => { const h = document.createElement("div"); h.className = "chooser-label"; h.textContent = t; body.appendChild(h); };
+      const btn = (name, active, onClick) => { const b = document.createElement("button"); b.className = "btn" + (active ? " primary" : ""); b.textContent = name; b.addEventListener("click", () => { this.audio.unlock(); onClick(); }); body.appendChild(b); };
+      if (kind === "music" && menus.music) menus.music.options.forEach(o => btn(o.name, o.id === menus.music.current, () => { menus.music.set(o.id); this._closeChooser(); }));
+      else if (kind === "skin" && menus.skin) menus.skin.options.forEach(o => btn(o.name, o.id === menus.skin.current, () => { menus.skin.set(o.id); this._closeChooser(); }));
+      else if (kind === "control" && menus.control) {
+        const c = menus.control;
+        if (c.profiles) { label("Layout"); c.profiles.forEach(o => btn(o.name, o.id === c.profile, () => { c.setProfile(o.id); this._renderChooser(); })); }
+        if (c.toggles) { label("Options"); c.toggles.forEach(t => btn(t.name + (t.on ? "   ✓" : "   ✕"), t.on, () => { t.set(!t.on); this._renderChooser(); })); }
+      } else this._closeChooser();
+    }
+
     // ---------------- DOM wiring ----------------
     _wireChrome() {
       this.refs.backBtn.addEventListener("click", () => this.showMenu());
       if (this.refs.pauseBtn) this.refs.pauseBtn.addEventListener("click", () => { if (!this._over) this.togglePause(); });
+      if (this.refs.controlBtn) this.refs.controlBtn.addEventListener("click", () => this._openChooser("control"));
       this.refs.soundBtn.addEventListener("click", () => {
         this.audio.unlock();
         this.audio.toggleMuted();
         this._updateSoundIcon();
         if (!this.audio.muted) this.audio.play("select");
       });
-      this.refs.themeBtn.addEventListener("click", () => this.cycleTheme());
-      this.refs.musicBtn.addEventListener("click", () => { this.audio.unlock(); this.cycleMusic(); });
+      this.refs.themeBtn.addEventListener("click", () => { const m = this._gameMenus(); if (m && m.skin) this._openChooser("skin"); else this.cycleTheme(); });
+      this.refs.musicBtn.addEventListener("click", () => { this.audio.unlock(); const m = this._gameMenus(); if (m && m.music) this._openChooser("music"); else this.cycleMusic(); });
       this.refs.devBtn.addEventListener("click", () => this.toggleDev());
     }
 
@@ -288,12 +314,14 @@
               case "restart": this.restartGame(); break;
               case "theme":   this.cycleTheme(); break;
               case "quit":    this.showMenu(); break;
+              case "closeChooser": this._closeChooser(); break;
             }
           });
         });
       };
       handle(this.refs.pauseOverlay);
       handle(this.refs.gameoverOverlay);
+      handle(this.refs.chooserOverlay);
     }
 
     _wireGlobalKeys() {
