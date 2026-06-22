@@ -158,8 +158,11 @@
       this._updateDevIcon();
 
       // Touch buttons: shown for games that use them; pointer-driven games opt out.
-      if (this.isTouch && !this._game.pointerInput) { this._applyTouchLabels(this._game); this._show(this.refs.touchControls); }
-      else this._hide(this.refs.touchControls);
+      if (this.isTouch && !this._game.pointerInput) {
+        this._applyTouchLabels(this._game);
+        this.refs.touchControls.classList.toggle("gamepad", this._game.touchLayout === "gamepad");
+        this._show(this.refs.touchControls);
+      } else this._hide(this.refs.touchControls);
 
       this._game.start();
       this._game.resize(this._cssW, this._cssH, this._touchInset());
@@ -338,10 +341,11 @@
     _applyTouchLabels(game) {
       const labels = game && game.touchLabels;
       this.refs.touchControls.querySelectorAll(".tc-btn").forEach(b => {
+        b.style.display = "";   // clear any inline display left by a previous game so CSS/grid rules apply cleanly
         const act = b.getAttribute("data-act");
         const lbl = (labels && Object.prototype.hasOwnProperty.call(labels, act)) ? labels[act] : this._touchDefaults[act];
         if (lbl === "") { b.style.display = "none"; }
-        else { b.style.display = ""; b.textContent = lbl; }
+        else { b.textContent = lbl; }
       });
     }
 

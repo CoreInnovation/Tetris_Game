@@ -15,7 +15,7 @@
   const EJECT_V = 235, COLD_G = 540, EJECT_DELAY = 0.45;
   const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9;
   const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000, POW_FAVOR = 0.6;
-  const HORNET_SPEED = 430, HORNET_TURN = 7.5, BH_PULL = 340, ZIG_AMP = 48;
+  const HORNET_SPEED = 510, HORNET_TURN = 10, BH_PULL = 340, ZIG_AMP = 48;
 
   // Primitive stats only — reload/heat/cool are DERIVED below from a balance model.
   const WEAPONS = [
@@ -26,7 +26,7 @@
     { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 64, sfx: "launch", color: "#ffe14d" },
     { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 30, cluster: 8, sfx: "launch", color: "#ff7a3a" },
     { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 95, slow: 3.5, sfx: "cryo", color: "#8fd9ff" },
-    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 440, blast: 26, pellets: 4, sfx: "launch", color: "#9aff6a" },
+    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 510, blast: 32, pellets: 5, sfx: "launch", color: "#9aff6a" },
     { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 5, weight: 1.15, sfx: "rail", color: "#b388ff" },
     { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 120, blackhole: true, weight: 1.6, sfx: "cryo", color: "#c86bff" },
     // homing interceptors — quarter-size blast, but they track the target themselves (hand-tuned)
@@ -115,11 +115,12 @@
       this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = [];
       this.weapon = "interceptor";
       this.unlocked = { interceptor: true };
+      this.collected = ["interceptor"];   // up to 4 held weapons (non-dev inventory)
       if (this.dev) WEAPONS.forEach(w => { this.unlocked[w.id] = true; });
       this.reload = {}; this.cdT = {}; this.heat = {}; this.idleT = {};
       WEAPONS.forEach(w => { this.reload[w.id] = 0; this.cdT[w.id] = 0; this.heat[w.id] = 0; this.idleT[w.id] = 9999; });
       this.multishot = 1; this.multishotT = 0;
-      this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false;
+      this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(6000, 10000); this.ufoT = rand(11000, 17000);
       this.shakeMag = 0; this.flash = 0; this.toasts = [];
@@ -157,6 +158,8 @@
     toggleDev() {
       this.dev = !this.dev;
       if (this.dev) WEAPONS.forEach(w => { this.unlocked[w.id] = true; });
+      else { WEAPONS.forEach(w => { this.unlocked[w.id] = false; }); this.collected.forEach(id => { this.unlocked[id] = true; }); if (!this.unlocked[this.weapon]) this.weapon = "interceptor"; }
+      this._layoutChips();
       this._toast(this.dev ? "DEV MODE ON — all weapons" : "DEV MODE OFF");
       return this.dev;
     }
@@ -196,9 +199,35 @@
       this.batteries.forEach(b => b.x = sx(b.slot));
       this.cities.forEach(c => c.x = sx(c.slot));
       this.slotW = slotW;
-      const n = WEAPONS.length, cw = Math.min(96, Math.max(40, (w - 30) / n - 5)), ch = 30, gap = 5;
-      const total = n * cw + (n - 1) * gap, startX = Math.round((w - total) / 2), y = 54;
-      this.weaponChips = WEAPONS.map((wp, i) => ({ id: wp.id, x: startX + i * (cw + gap), y: y, w: cw, h: ch }));
+      this._layoutChips();
+    }
+
+    // Weapon chips: dev shows ALL, normal play shows just your collected inventory (<=4). Centered, wraps to rows.
+    _layoutChips() {
+      const w = this._w || 800;
+      const ids = this.dev ? WEAPONS.map(wp => wp.id) : (this.collected ? this.collected.slice() : ["interceptor"]);
+      const n = ids.length, gap = 6, ch = 30;
+      const cols = Math.max(1, Math.min(n, Math.floor((w - 16) / 64)));
+      const cw = Math.max(54, Math.min(110, Math.floor((w - 16 - (cols - 1) * gap) / cols)));
+      this.weaponChips = [];
+      for (let i = 0; i < n; i++) {
+        const r = Math.floor(i / cols), c = i % cols, rowCount = Math.min(cols, n - r * cols);
+        const total = rowCount * cw + (rowCount - 1) * gap, startX = Math.round((w - total) / 2);
+        this.weaponChips.push({ id: ids[i], x: startX + c * (cw + gap), y: 50 + r * (ch + 6), w: cw, h: ch });
+      }
+    }
+
+    // Collect a weapon into the 4-slot inventory (drops the oldest spare past 4), then equip it.
+    _collectWeapon(id) {
+      if (!this.collected.includes(id)) {
+        this.collected.push(id); this.unlocked[id] = true;
+        while (this.collected.length > 4) {
+          const drop = this.collected.find(wid => wid !== "interceptor" && wid !== id && wid !== this.weapon);   // never drop the base, the new one, or what you're holding
+          if (!drop) break;
+          this.collected.splice(this.collected.indexOf(drop), 1); this.unlocked[drop] = false;
+        }
+      }
+      this.weapon = id; this._layoutChips();
     }
 
     _nextWave() {
@@ -256,11 +285,11 @@
           sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle", spin: 6 });
         return;
       }
-      const w = WMAP[pu.weapon], wasLocked = !this.unlocked[pu.weapon];
-      this.unlocked[pu.weapon] = true; this.weapon = pu.weapon;
+      const w = WMAP[pu.weapon], wasNew = !this.collected.includes(pu.weapon);
+      this._collectWeapon(pu.weapon);   // adds to the 4-slot inventory + equips
       this.heat[pu.weapon] = 0; this.cdT[pu.weapon] = 0; this.reload[pu.weapon] = 0;
       this.audio.play("extralife");
-      this._toast((wasLocked ? "UNLOCKED — " : "") + w.name + "!", true);
+      this._toast((wasNew ? "GOT — " : "") + w.name + "!", true);
       if (this.theme.effects.particles) this.particles.emit({ x: pu.x, y: pu.y, count: 26,
         colors: [w.color || this.theme.palette.powerup, this.theme.palette.exhaust, "#ffffff"],
         speedMin: 50, speedMax: 280, gravity: 60, drag: 1, sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle", spin: 6 });
@@ -344,9 +373,9 @@
       } else if (w.kind === "swarm") {
         const n = w.pellets || 4;
         for (let i = 0; i < n; i++) {
-          const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.5;
+          const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.38;   // tighter fan so the swarm converges on targets faster
           this.interceptors.push(this._proj(w, bx, by, tx, ty, { mode: "home",
-            vx: Math.cos(a) * HORNET_SPEED, vy: Math.sin(a) * HORNET_SPEED, heading: a, fuse: 3.6 }));
+            vx: Math.cos(a) * HORNET_SPEED, vy: Math.sin(a) * HORNET_SPEED, heading: a, fuse: 4.2 }));
         }
         this._muzzle(bx, by, w);
       } else {
@@ -568,7 +597,7 @@
           if (trig || it.fuse <= 0 || it.y > this.groundY) {
             if (tgt && Math.hypot(tgt.x - it.x, tgt.y - it.y) < 95) {  // a homing missile reliably kills its mark (matches the flyby trigger radius)
               const ei = this.enemies.indexOf(tgt);
-              if (ei >= 0) { this.enemies.splice(ei, 1); this.score += 25 * this.wave; this._burst(tgt.x, tgt.y, it.color, 7); }
+              if (ei >= 0) { this.enemies.splice(ei, 1); this.score += 25 * this.wave; this._burst(tgt.x, tgt.y, it.color, 13); if (this.theme.effects.shake) this._shake(3); }
               else { const ui = this.ufos.indexOf(tgt); if (ui >= 0) { this.ufos.splice(ui, 1); const pts = 150 + this.wave * 25; this.score += pts; this._toast("UFO! +" + pts, true); this._burst(tgt.x, tgt.y, "#46f0c0", 20); if (this.theme.effects.shake) this._shake(6); } }
             }
             this._detonate(it); this.interceptors.splice(i, 1);
@@ -612,7 +641,18 @@
         c.panic = this.enemies.some(m => Math.hypot(m.x - c.x, m.y - this.groundY) < PANIC_DIST);
         if (c.panic) { anyPanic = true; if (this.enemies.length && this.tracers.length < 64 && Math.random() < dt / 150) this._spawnTracer(c.x); }   // panicking folks plink away (harmless)
       }
-      for (let i = this.tracers.length - 1; i >= 0; i--) { const tr = this.tracers[i]; tr.x += tr.vx * s; tr.y += tr.vy * s; tr.life -= s; if (tr.life <= 0 || tr.y < -12) this.tracers.splice(i, 1); }
+      if (this.peopleCdT > 0) this.peopleCdT -= dt;
+      for (let i = this.tracers.length - 1; i >= 0; i--) {
+        const tr = this.tracers[i]; tr.x += tr.vx * s; tr.y += tr.vy * s; tr.life -= s;
+        let hit = false;
+        if (this.peopleCdT <= 0) {   // limited firepower: the crowd can only pick off ~1 enemy every couple seconds (a barrage overwhelms them)
+          for (let k = this.enemies.length - 1; k >= 0; k--) {
+            const m = this.enemies[k];
+            if (Math.hypot(m.x - tr.x, m.y - tr.y) < 16) { this.enemies.splice(k, 1); this.score += 5; this._burst(m.x, m.y, "#ffe066", 9); this.peopleCdT = rand(1700, 2600); hit = true; break; }
+          }
+        }
+        if (hit || tr.life <= 0 || tr.y < -12) this.tracers.splice(i, 1);
+      }
       if (anyPanic && !this._prevPanic) { this.sirenT = 0; this.crowdT = 0; }   // siren only re-arms on a genuine calm->panic transition (no flicker spam)
       if (anyPanic) {
         this.sirenT -= dt; if (this.sirenT <= 0) { this.audio.play("siren"); this.sirenT = 9000; }

@@ -72,7 +72,9 @@
       this.renderer = new A.Renderer();
       this.theme = A.getTheme(ctx.storage.get("asteroids:theme", "modern"));
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("asteroids:song", 0) | 0));
-      this.touchLabels = { left: "◀", right: "▶", cw: "THRUST", ccw: "WARP", hard: "FIRE", hold: "◀WPN", soft: "WPN▶" };
+      this.pointerInput = true;   // custom floating thumbstick + fire button instead of the shared touch bar
+      this.stick = { active: false, id: null, baseX: 0, baseY: 0, kx: 0, ky: 0, dx: 0, dy: 0, mag: 0 };
+      this.firing = false; this.fireId = null;
       this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600;
@@ -89,6 +91,7 @@
       this.weapon = "blaster"; this.ammo = {}; if (this.dev) WEAPONS.forEach(w => this.ammo[w.id] = Infinity);
       this.fireCd = 0; this.respawnT = 0; this.shakeMag = 0; this.toasts = [];
       this.ufoTimer = rand(12000, 22000); this.powerupTimer = rand(8000, 13000);
+      this._clearTouchState();
       this.particles.clear();
       this._spawnShip(true);
       this.state = "playing"; this.paused = false;
@@ -96,9 +99,12 @@
       this._applyMusic();
     }
 
-    pause() { this.paused = true; this.audio.suspendMusic(); }
+    // drop any held thumbstick/fire so it can't "stick on" across pause / game-over / restart
+    _clearTouchState() { this.stick.active = false; this.stick.id = null; this.stick.mag = 0; this.firing = false; this.fireId = null; }
+
+    pause() { this.paused = true; this._clearTouchState(); this.audio.suspendMusic(); }
     resume() { this.paused = false; this.audio.resumeMusic(); this._applyTempo(); }
-    destroy() { this.audio.stopMusic(); this._unsub.forEach(fn => fn()); this._unsub.length = 0; }
+    destroy() { this.audio.stopMusic(); this._clearTouchState(); this._unsub.forEach(fn => fn()); this._unsub.length = 0; }
 
     cycleTheme() {
       const list = A.Themes; this.theme = list[(list.indexOf(this.theme) + 1) % list.length];
@@ -129,9 +135,50 @@
         if (this.paused || this.state !== "playing" || repeat) return;
         if (code === "KeyZ" || code === "ShiftLeft" || code === "ShiftRight") this._hyperspace();
         else if (code.indexOf("Digit") === 0) { const n = parseInt(code.slice(5), 10) - 1; if (n >= 0 && n < WEAPONS.length && this._has(WEAPONS[n].id)) { this.weapon = WEAPONS[n].id; this.audio.play("select"); } }
-        else if (code === "KeyC" || code === "KeyQ") this._cycleWeapon(-1);   // touch "◀WPN" / keyboard Q
-        else if (code === "ArrowDown" || code === "KeyE") this._cycleWeapon(1);  // touch "WPN▶" / keyboard E
+        else if (code === "KeyC" || code === "KeyQ") this._cycleWeapon(-1);   // keyboard Q/C prev weapon
+        else if (code === "ArrowDown" || code === "KeyE") this._cycleWeapon(1);  // keyboard E next weapon
       }));
+      if (this.shell.isTouch) this._bindTouch();
+    }
+
+    // Floating "anywhere" thumbstick on the left, fire on the right. The stick base follows the finger when
+    // it's dragged past STICK_MAX, so you can re-aim from anywhere and reverse direction instantly.
+    _bindTouch() {
+      const canvas = this.shell.canvas, STICK_MAX = 70;
+      const toLocal = (t) => { const r = canvas.getBoundingClientRect(); return { x: (t.clientX - r.left) * (this._w / r.width), y: (t.clientY - r.top) * (this._h / r.height) }; };
+      const onStart = (e) => {
+        if (this.paused || this.state !== "playing") return;
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+          const p = toLocal(t);
+          if (p.x > this._w * 0.6) { if (this.fireId == null) { this.firing = true; this.fireId = t.identifier; } }
+          else if (!this.stick.active) { this.stick.active = true; this.stick.id = t.identifier; this.stick.baseX = p.x; this.stick.baseY = p.y; this.stick.kx = p.x; this.stick.ky = p.y; this.stick.dx = 0; this.stick.dy = 0; this.stick.mag = 0; }
+        }
+      };
+      const onMove = (e) => {
+        if (!this.stick.active) return;
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+          if (t.identifier !== this.stick.id) continue;
+          const p = toLocal(t);
+          let vx = p.x - this.stick.baseX, vy = p.y - this.stick.baseY, d = Math.hypot(vx, vy);
+          if (d > STICK_MAX) { const nx = vx / d, ny = vy / d; this.stick.baseX = p.x - nx * STICK_MAX; this.stick.baseY = p.y - ny * STICK_MAX; vx = nx * STICK_MAX; vy = ny * STICK_MAX; d = STICK_MAX; }
+          this.stick.kx = this.stick.baseX + vx; this.stick.ky = this.stick.baseY + vy;
+          if (d > 0.001) { this.stick.dx = vx / d; this.stick.dy = vy / d; } else { this.stick.dx = 0; this.stick.dy = 0; }
+          this.stick.mag = Math.min(1, d / STICK_MAX);
+        }
+      };
+      const onEnd = (e) => {
+        for (const t of e.changedTouches) {
+          if (t.identifier === this.stick.id) { this.stick.active = false; this.stick.id = null; this.stick.mag = 0; }
+          if (t.identifier === this.fireId) { this.firing = false; this.fireId = null; }
+        }
+      };
+      canvas.addEventListener("touchstart", onStart, { passive: false });
+      canvas.addEventListener("touchmove", onMove, { passive: false });
+      canvas.addEventListener("touchend", onEnd, { passive: false });
+      canvas.addEventListener("touchcancel", onEnd, { passive: false });
+      this._unsub.push(() => { canvas.removeEventListener("touchstart", onStart); canvas.removeEventListener("touchmove", onMove); canvas.removeEventListener("touchend", onEnd); canvas.removeEventListener("touchcancel", onEnd); });
     }
 
     // cycle through the currently-available weapons (for touch + Q/E)
@@ -279,9 +326,16 @@
       const I = this.shell.input, ship = this.ship;
       if (ship.invuln > 0) ship.invuln -= dt;
       if (ship.alive) {
-        if (I.isDown("ArrowLeft")) ship.angle -= ROT * s;
-        if (I.isDown("ArrowRight")) ship.angle += ROT * s;
-        ship.thrusting = I.isDown("ArrowUp");
+        if (this.stick.active && this.stick.mag > 0.18) {   // floating thumbstick: turn toward the push direction, thrust with magnitude
+          const desired = Math.atan2(this.stick.dy, this.stick.dx);
+          let diff = desired - ship.angle; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2;
+          const mt = ROT * 1.7 * s; ship.angle += Math.max(-mt, Math.min(mt, diff));
+          ship.thrusting = this.stick.mag > 0.4;
+        } else {
+          if (I.isDown("ArrowLeft")) ship.angle -= ROT * s;
+          if (I.isDown("ArrowRight")) ship.angle += ROT * s;
+          ship.thrusting = I.isDown("ArrowUp");
+        }
         if (ship.thrusting) {
           ship.vx += Math.cos(ship.angle) * THRUST * s; ship.vy += Math.sin(ship.angle) * THRUST * s;
           if (this.theme.effects.particles && Math.random() < 0.7) {
@@ -293,7 +347,7 @@
         ship.vx *= (1 - DRAG * s); ship.vy *= (1 - DRAG * s);
         ship.x += ship.vx * s; ship.y += ship.vy * s; this._wrap(ship);
         this.fireCd -= dt;
-        if (I.isDown("Space") && this.fireCd <= 0) { this._fire(); this.fireCd = WMAP[this.weapon].cd; }
+        if ((I.isDown("Space") || this.firing) && this.fireCd <= 0) { this._fire(); this.fireCd = WMAP[this.weapon].cd; }
       } else { this.respawnT -= dt; if (this.respawnT <= 0) this._respawnShip(); }
 
       // bullets (with homing steer + split/blackhole on expiry)
@@ -395,6 +449,7 @@
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, lives: this.lives, wave: this.wave });
       R.drawWeaponTag(ctx, th, WMAP[this.weapon], this.dev ? "∞" : (WMAP[this.weapon].base ? "∞" : (this.ammo[this.weapon] || 0)), this.dev);
+      if (this.shell.isTouch) R.drawTouchControls(ctx, th, this.stick, this.firing, this._w, this._h);
       this._renderToasts(ctx, R, th, now);
       R.drawScanlines(ctx, th);
     }

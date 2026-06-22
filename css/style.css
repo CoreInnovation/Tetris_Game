@@ -93,8 +93,9 @@ html, body {
 
 /* ===================== MAIN MENU ===================== */
 #menu {
-  display: grid;
-  place-items: center;
+  display: grid;                          /* grid + child margin:auto centers AND scrolls with no top-clip */
+  overflow-y: auto;                       /* let the game list thumb-scroll on small/portrait phones */
+  -webkit-overflow-scrolling: touch;
   background:
     radial-gradient(1200px 600px at 50% -10%, rgba(90, 209, 255, 0.10), transparent),
     radial-gradient(900px 500px at 90% 110%, rgba(255, 90, 209, 0.08), transparent);
@@ -103,6 +104,8 @@ html, body {
 .menu-inner {
   width: min(900px, 92vw);
   text-align: center;
+  margin: auto;                           /* center when it fits, scroll from top (no clip) when it doesn't */
+  padding: 24px 16px;
 }
 
 .menu-kicker {
@@ -229,11 +232,12 @@ html, body {
   left: 0; right: 0; bottom: 0;
   padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
   gap: 8px;
   z-index: 15;
 }
-.touch-row { display: flex; gap: 8px; justify-content: center; }
 .tc-btn {
   flex: 1;
   min-width: 46px;
@@ -252,6 +256,17 @@ html, body {
 }
 .tc-btn:active { background: rgba(90, 209, 255, 0.3); box-shadow: 0 0 0 2px rgba(90, 209, 255, 0.5) inset; }
 .tc-btn.wide { max-width: 160px; }
+
+/* NES-style gamepad layout: D-pad (◀ ▶ on top, ▼ below) on the left, Rotate/Drop on the right.
+   Buttons are direct children of .touch-controls (no display:contents) so it works on all of iOS. */
+.touch-controls.gamepad { display: grid; grid-template-columns: 1.1fr 1.1fr 0.35fr 1.5fr; grid-template-rows: 56px 56px; gap: 8px 10px; align-items: stretch; }
+.touch-controls.gamepad .tc-btn { max-width: none; width: 100%; height: 100%; }
+.touch-controls.gamepad [data-act="left"]  { grid-column: 1; grid-row: 1; }
+.touch-controls.gamepad [data-act="right"] { grid-column: 2; grid-row: 1; }
+.touch-controls.gamepad [data-act="soft"]  { grid-column: 1 / span 2; grid-row: 2; }
+.touch-controls.gamepad [data-act="cw"]    { grid-column: 4; grid-row: 1; }
+.touch-controls.gamepad [data-act="hard"]  { grid-column: 4; grid-row: 2; }
+.touch-controls.gamepad [data-act="ccw"], .touch-controls.gamepad [data-act="hold"] { display: none; }
 
 /* ===================== RESPONSIVE / MOBILE ===================== */
 @media (max-width: 380px) {

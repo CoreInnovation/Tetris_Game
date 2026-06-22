@@ -110,6 +110,8 @@
       this._unsub = [];
       this.paused = false;
       this.state = "playing"; // playing | clearing | over
+      this.touchLayout = "gamepad";   // NES-style: ◀ ▶ / ▼ d-pad on the left, Rotate + Drop on the right
+      this.touchLabels = { left: "◀", right: "▶", soft: "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" };
 
       this._bindInput();
     }
