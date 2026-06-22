@@ -13,7 +13,7 @@
   const ENEMY_BASE = 44, AIM_SPEED = 380;
   const BAT_SLOTS = [0, 4, 8], CITY_SLOTS = [1, 2, 3, 5, 6, 7];
   const EJECT_V = 235, COLD_G = 540, EJECT_DELAY = 0.45;
-  const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9;
+  const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9, SEEK_REACH = 200;
   const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000, POW_FAVOR = 0.6;
   const HORNET_SPEED = 510, HORNET_TURN = 10, BH_PULL = 340, ZIG_AMP = 48;
 
@@ -121,6 +121,7 @@
       WEAPONS.forEach(w => { this.reload[w.id] = 0; this.cdT[w.id] = 0; this.heat[w.id] = 0; this.idleT[w.id] = 9999; });
       this.multishot = 1; this.multishotT = 0;
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0;
+      this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(6000, 10000); this.ufoT = rand(11000, 17000);
       this.shakeMag = 0; this.flash = 0; this.toasts = [];
@@ -364,8 +365,8 @@
       if (w.kind === "cold") {
         const n = w.pellets || 1;
         for (let i = 0; i < n; i++) {
-          this.interceptors.push(this._proj(w, bx, by, tx, ty, { vx: rand(-26, 26) + (i - (n - 1) / 2) * 16, vy: -EJECT_V, mode: "eject",
-            igniteTimer: EJECT_DELAY, ignited: false, guided: true, fuse: 4.5, heading: -Math.PI / 2, homing: !!w.homing }));
+          this.interceptors.push(this._proj(w, bx, by, tx, ty, { vx: rand(-26, 26) + (i - (n - 1) / 2) * 16, vy: -EJECT_V * (w.homing ? 1.2 : 1), mode: "eject",
+            igniteTimer: w.homing ? EJECT_DELAY * 0.55 : EJECT_DELAY, ignited: false, guided: true, fuse: 4.5, heading: -Math.PI / 2, homing: !!w.homing }));
         }
         if (this.theme.effects.particles) this.particles.emit({ x: bx, y: by - 4, count: 12, colors: ["#cfd6df", "#ffffff", "#9aa0aa"],
           speedMin: 20, speedMax: 110, angleMin: -Math.PI * 0.95, angleMax: -Math.PI * 0.05, gravity: 90, drag: 1.4,
@@ -548,23 +549,25 @@
           if (it.homing) {
             if (!it._homeOn) {
               const tot = Math.hypot(it.tx - it.bx, it.ty - it.by) || 1, trav = Math.hypot(it.x - it.bx, it.y - it.by);
-              if (trav >= 0.65 * tot) it._homeOn = true;   // flew ~65% of the way, NOW it can chase
+              if (trav >= 0.25 * tot) { it._homeOn = true; it.tx0 = it.tx; it.ty0 = it.ty; }   // short commit, then hunt — snapshot the aim point
             }
             if (it._homeOn) {
+              const R = SEEK_REACH;   // can only chase threats within a wide radius of where you aimed (takes a little skill)
               let tEn = null, eD = 1e9, tPow = null, pD = 1e9;
-              for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
-              for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
-              for (const pu of this.powerups) { const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < pD) { pD = d; tPow = pu; } }
+              for (const m of this.enemies) { if (Math.hypot(m.x - it.tx0, m.y - it.ty0) > R) continue; const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
+              for (const u of this.ufos) { if (Math.hypot(u.x - it.tx0, u.y - it.ty0) > R) continue; const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
+              for (const pu of this.powerups) { if (Math.hypot(pu.x - it.tx0, pu.y - it.ty0) > R) continue; const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < pD) { pD = d; tPow = pu; } }
               tgt = (tPow && pD * POW_FAVOR <= eD) ? tPow : (tEn || tPow);   // favor powerups a little over enemies
-              if (tgt) { it.tx = tgt.x; it.ty = tgt.y; }
+              it.tx = tgt ? tgt.x : it.tx0; it.ty = tgt ? tgt.y : it.ty0;   // nothing nearby -> keep heading to the aim point
             }
           }
           const dx = it.tx - it.x, dy = it.ty - it.y, dist = Math.hypot(dx, dy);
           let diff = Math.atan2(dy, dx) - it.heading; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2;
           const mt = (it.homing ? TURN_RATE * 2.4 : TURN_RATE) * s; it.heading += Math.max(-mt, Math.min(mt, diff));   // seekers turn tighter so they don't orbit
-          it.vx += Math.cos(it.heading) * BURN_THRUST * s; it.vy += Math.sin(it.heading) * BURN_THRUST * s;
+          const thrust = it.homing ? BURN_THRUST * 1.3 : BURN_THRUST, vmax = it.homing ? BURN_MAX * 1.25 : BURN_MAX;   // seekers launch & cruise a bit faster
+          it.vx += Math.cos(it.heading) * thrust * s; it.vy += Math.sin(it.heading) * thrust * s;
           const dragF = 1 - BURN_DRAG * s; it.vx *= dragF; it.vy *= dragF;
-          const sp = Math.hypot(it.vx, it.vy); if (sp > BURN_MAX) { it.vx *= BURN_MAX / sp; it.vy *= BURN_MAX / sp; }
+          const sp = Math.hypot(it.vx, it.vy); if (sp > vmax) { it.vx *= vmax / sp; it.vy *= vmax / sp; }
           it.x += it.vx * s; it.y += it.vy * s; it.fuse -= s;
           this._catchPowerups(it);   // grab powerups it flies through (incl. during the committed phase)
           let trig = (dist <= sp * s + 8 || dist < 14 || it.fuse <= 0);
@@ -667,11 +670,15 @@
       }
       this._prevPanic = anyPanic;
 
-      if (this.pending <= 0 && this.enemies.length === 0 && this.ufos.length === 0) {   // advance as soon as all THREATS are down — don't wait for our own missiles/blasts to finish
+      if (!this.betweenWaves && this.pending <= 0 && this.enemies.length === 0 && this.ufos.length === 0) {   // all THREATS down -> start a breather
         const aliveCities = this.cities.filter(c => c.alive).length;
         const bonus = aliveCities * 120;
         if (bonus > 0) { this.score += bonus; this._toast("+" + bonus + " BONUS", true); }
-        this._nextWave();
+        this.betweenWaves = true; this.waveBreakT = 5000;
+      }
+      if (this.betweenWaves) {
+        this.waveBreakT -= dt;
+        if (this.waveBreakT <= 0) { this.betweenWaves = false; this._nextWave(); }
       }
     }
 
@@ -704,6 +711,15 @@
         heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / w.cd) : 0,
         reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / w.reload, keyNum: WEAPONS.indexOf(w) + 1 }; });
       R.drawWeaponBar(ctx, th, chipData);
+      if (this.betweenWaves) {   // breather countdown between waves
+        const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }
+        ctx.fillStyle = p.accent; ctx.font = "800 30px " + th.fonts.ui;
+        ctx.fillText("WAVE " + this.wave + " CLEARED", this._w / 2, this._h * 0.42);
+        ctx.shadowBlur = 0; ctx.fillStyle = p.textDim; ctx.font = "600 18px " + th.fonts.ui;
+        ctx.fillText("NEXT WAVE IN " + Math.ceil(this.waveBreakT / 1000), this._w / 2, this._h * 0.42 + 34);
+        ctx.restore();
+      }
       this._renderToasts(ctx, R, th, now);
       if (this.flash > 0) { ctx.save(); ctx.globalAlpha = this.flash * 0.5; ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, this._w, this._h); ctx.restore(); }
       R.drawScanlines(ctx, th);
