@@ -107,9 +107,9 @@
         { x: 60, y: 170, r: 11, hit: 0 },    // small upper "post" kickers
         { x: 322, y: 158, r: 11, hit: 0 }
       ];
-      this.flippers = [
-        { px: 140, py: 604, len: 70, thick: 7, rest: 0.40, active: -0.52, angle: 0.40, prev: 0.40, angVel: 0, pressed: false },
-        { px: 284, py: 604, len: 70, thick: 7, rest: Math.PI - 0.40, active: Math.PI + 0.52, angle: Math.PI - 0.40, prev: Math.PI - 0.40, angVel: 0, pressed: false }
+      this.flippers = [   // pivots spread wide; inner tips leave a ~40px center DRAIN gap (≈2 ball widths)
+        { px: 122, py: 600, len: 78, thick: 8, rest: 0.46, active: -0.50, angle: 0.46, prev: 0.46, angVel: 0, pressed: false },
+        { px: 302, py: 600, len: 78, thick: 8, rest: Math.PI - 0.46, active: Math.PI + 0.50, angle: Math.PI - 0.46, prev: Math.PI - 0.46, angVel: 0, pressed: false }
       ];
       // a bank of drop targets (classic scoring feature)
       this.targets = [];
@@ -317,10 +317,14 @@
 
         for (const f of this.flippers) {
           const tx = f.px + Math.cos(f.angle) * f.len, ty = f.py + Math.sin(f.angle) * f.len;
-          const hit = this._collideSeg(b, f.px, f.py, tx, ty, f.thick, 0.45);
-          if (hit && f.pressed && f.moving) {
-            const out = b.vx * hit.nx + b.vy * hit.ny;
-            if (out < FLIP_BOOST) { b.vx += hit.nx * (FLIP_BOOST - out); b.vy += hit.ny * (FLIP_BOOST - out); }
+          const hit = this._collideSeg(b, f.px, f.py, tx, ty, f.thick, 0.4);
+          if (hit) {
+            // impart the flipper's surface velocity at the contact point (v = ω × r) — the tip launches hardest
+            const rx = b.x - f.px, ry = b.y - f.py;
+            const svx = -f.angVel * ry, svy = f.angVel * rx;
+            const along = svx * hit.nx + svy * hit.ny;
+            if (along > 0) { b.vx += hit.nx * along; b.vy += hit.ny * along; }
+            if (f.pressed && f.moving) { const out = b.vx * hit.nx + b.vy * hit.ny; if (out < FLIP_BOOST) { b.vx += hit.nx * (FLIP_BOOST - out); b.vy += hit.ny * (FLIP_BOOST - out); } }
           }
         }
       }
