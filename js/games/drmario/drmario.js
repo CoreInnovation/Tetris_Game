@@ -96,8 +96,7 @@
       this.paused = false;
       this.state = "playing";
       this._now = 0;
-      this.touchLayout = "gamepad";   // same NES-style control layout as Tetris
-      this.touchLabels = { left: "◀", right: "▶", soft: "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" };   // no hold piece in Dr. Quackers
+      this._ctrl = ctx.storage.get("drmario:ctrl", "gamepad");   // gamepad (2-thumb) | thumb-r | thumb-l
       this._bindInput();
     }
 
@@ -148,6 +147,21 @@
       this.shell.storage.set("drmario:theme", this.theme.id);
       if (!this.theme.effects.particles) this.particles.clear();
       return this.theme.name;
+    }
+
+    get touchLayout() { return this._ctrl === "thumb-l" ? "onethumb onethumb-left" : this._ctrl === "thumb-r" ? "onethumb onethumb-right" : "gamepad"; }
+    get touchLabels() { const one = this._ctrl !== "gamepad"; return { left: "◀", right: "▶", soft: one ? "" : "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" }; }
+    menus() {
+      const self = this, SG = D.SONGS;
+      return {
+        control: {
+          profiles: [{ id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }],
+          profile: this._ctrl,
+          setProfile: (id) => { self._ctrl = id; self.shell.storage.set("drmario:ctrl", id); }
+        },
+        music: { options: SG.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("drmario:song", i); self._applyMusic(); } },
+        skin: { options: D.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = D.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("drmario:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
+      };
     }
 
     // ---------------- bottle setup ----------------

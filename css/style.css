@@ -279,6 +279,17 @@ html, body {
 .touch-controls.flippers [data-act="hard"] { grid-column: 2; }
 .touch-controls.flippers [data-act="right"] { grid-column: 3; }
 
+/* One-thumb cluster (Tetris / Dr. Quackers): Rotate + Drop over ◀ ▶, all reachable by a single thumb in one corner */
+.touch-controls.onethumb { display: grid; grid-template-columns: 66px 66px; grid-template-rows: 58px 58px; gap: 10px; }
+.touch-controls.onethumb.onethumb-right { justify-content: end; }
+.touch-controls.onethumb.onethumb-left { justify-content: start; }
+.touch-controls.onethumb .tc-btn { max-width: none; width: 100%; height: 100%; }
+.touch-controls.onethumb [data-act="cw"]    { grid-area: 1 / 1; }
+.touch-controls.onethumb [data-act="hard"]  { grid-area: 1 / 2; }
+.touch-controls.onethumb [data-act="left"]  { grid-area: 2 / 1; }
+.touch-controls.onethumb [data-act="right"] { grid-area: 2 / 2; }
+.touch-controls.onethumb [data-act="soft"], .touch-controls.onethumb [data-act="ccw"], .touch-controls.onethumb [data-act="hold"] { display: none; }
+
 /* ===================== RESPONSIVE / MOBILE ===================== */
 @media (max-width: 380px) {
   #topbar { padding: 8px 10px; gap: 8px; }
