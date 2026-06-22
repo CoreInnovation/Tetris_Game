@@ -18,20 +18,23 @@
   const HORNET_SPEED = 510, HORNET_TURN = 10, BH_PULL = 340, ZIG_AMP = 48;
 
   // Primitive stats only — reload/heat/cool are DERIVED below from a balance model.
+  // minWave = the wave a weapon becomes ELIGIBLE to drop (powerful ones arrive later, so they're
+  // not OP in the opening waves). Ordered weakest -> strongest; dev mode ignores the gate.
   const WEAPONS = [
-    { id: "interceptor", name: "INTERCEPTOR", short: "INT", kind: "direct", speed: 640, blast: 60, base: true, sfx: "launch", color: null },
-    { id: "missile", name: "WARHEAD", short: "WAR", kind: "cold", speed: 320, blast: 170, sfx: "eject", color: null },
-    { id: "artillery", name: "ARTILLERY", short: "ART", kind: "arc", speed: 1150, blast: 74, sfx: "artillery", color: "#ff9a3a" },
-    { id: "railgun", name: "RAIL GUN", short: "RAIL", kind: "direct", speed: 2600, blast: 22, sfx: "rail", color: "#7afcff" },
-    { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 64, sfx: "launch", color: "#ffe14d" },
-    { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 30, cluster: 8, sfx: "launch", color: "#ff7a3a" },
-    { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 95, slow: 3.5, sfx: "cryo", color: "#8fd9ff" },
-    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 510, blast: 32, pellets: 5, sfx: "launch", color: "#9aff6a" },
-    { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 5, weight: 2.6, sfx: "rail", color: "#b388ff" },
-    { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 120, blackhole: true, weight: 1.6, sfx: "cryo", color: "#c86bff" },
-    // homing interceptors — quarter-size blast, but they track the target themselves (hand-tuned)
+    { id: "interceptor", name: "INTERCEPTOR", short: "INT", kind: "direct", speed: 640, blast: 60, base: true, minWave: 1, sfx: "launch", color: null },
+    { id: "artillery", name: "ARTILLERY", short: "ART", kind: "arc", speed: 1150, blast: 74, minWave: 2, sfx: "artillery", color: "#ff9a3a" },
+    { id: "railgun", name: "RAIL GUN", short: "RAIL", kind: "direct", speed: 2600, blast: 22, minWave: 3, sfx: "rail", color: "#7afcff" },
+    { id: "missile", name: "WARHEAD", short: "WAR", kind: "cold", speed: 320, blast: 170, minWave: 3, sfx: "eject", color: null },
+    { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 95, slow: 3.5, minWave: 4, sfx: "cryo", color: "#8fd9ff" },
+    { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 64, minWave: 4, sfx: "launch", color: "#ffe14d" },
     // homing interceptors that COLD-LAUNCH like the warhead (eject -> ignite -> home); quarter-size blast
-    { id: "seeker", name: "SEEKER", short: "SEEK", kind: "cold", homing: true, speed: 320, blast: 15, pellets: 1, reload: 460, mag: 5, cd: 1100, manual: true, sfx: "eject", color: "#9affd0" }
+    { id: "seeker", name: "SEEKER", short: "SEEK", kind: "cold", homing: true, speed: 320, blast: 15, pellets: 1, reload: 460, mag: 5, cd: 1100, manual: true, minWave: 5, sfx: "eject", color: "#9affd0" },
+    // NAPALM — arcs in, splashes a lingering FIRE FIELD that incinerates anything passing through for a few seconds
+    { id: "napalm", name: "NAPALM", short: "NAPM", kind: "arc", speed: 820, blast: 46, fire: true, fireR: 86, fireDur: 3.4, manual: true, reload: 520, mag: 4, cd: 1900, minWave: 6, sfx: "boom", color: "#ff6a2a" },
+    { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 30, cluster: 8, minWave: 6, sfx: "launch", color: "#ff7a3a" },
+    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 510, blast: 32, pellets: 5, minWave: 7, sfx: "launch", color: "#9aff6a" },
+    { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 5, weight: 2.6, minWave: 8, sfx: "rail", color: "#b388ff" },
+    { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 120, blackhole: true, weight: 1.6, minWave: 10, sfx: "cryo", color: "#c86bff" }
   ];
   // ---- balance model ----
   // reload = time between shots (from blast coverage x impacts and speed-to-target).
@@ -112,7 +115,7 @@
       this.batteries = BAT_SLOTS.map(s => ({ slot: s, alive: true, x: 0 }));
       this.cities = CITY_SLOTS.map(s => ({ slot: s, alive: true, x: 0, panic: false }));
       this.enemies = []; this.interceptors = []; this.explosions = []; this.powerups = [];
-      this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = [];
+      this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = []; this.fires = [];
       this.weapon = "interceptor";
       this.unlocked = { interceptor: true };
       this.collected = ["interceptor"];   // up to 4 held weapons (non-dev inventory)
@@ -276,9 +279,14 @@
         this.powerups.push({ x: x, y: -12, vy: vy, kind: "mult", mult: mult, radius: 15, t: 0 });
         return;
       }
-      const specials = WEAPONS.filter(w => !w.base);
-      const locked = specials.filter(w => !this.unlocked[w.id]);
-      const pool = locked.length ? locked : specials;
+      // only offer weapons the wave has unlocked (powerful ones arrive later); prefer ones you don't have yet
+      const eligible = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave);
+      if (!eligible.length) {   // nothing unlocked yet -> hand out a multi-fire pod instead
+        const mult = Math.random() < 0.62 ? 2 : 3;
+        this.powerups.push({ x: x, y: -12, vy: vy, kind: "mult", mult: mult, radius: 15, t: 0 }); return;
+      }
+      const locked = eligible.filter(w => !this.unlocked[w.id]);
+      const pool = locked.length ? locked : eligible;
       const w = pool[(Math.random() * pool.length) | 0];
       this.powerups.push({ x: x, y: -12, vy: vy, weapon: w.id, radius: 14, t: 0 });
     }
@@ -331,7 +339,8 @@
     // build a projectile carrying the active weapon's payload flags
     _proj(w, bx, by, tx, ty, extra) {
       const base = { bx: bx, by: by, x: bx, y: by, tx: tx, ty: ty, weapon: w.id, blast: w.blast,
-        color: w.color, cluster: w.cluster || 0, slow: w.slow || 0, chain: w.chain || 0, blackhole: !!w.blackhole };
+        color: w.color, cluster: w.cluster || 0, slow: w.slow || 0, chain: w.chain || 0, blackhole: !!w.blackhole,
+        fire: !!w.fire, fireR: w.fireR || 0, fireDur: w.fireDur || 0 };
       return Object.assign(base, extra || {});
     }
 
@@ -409,6 +418,7 @@
 
     _detonate(it) {
       if (it.blackhole) { this._spawnBlackhole(it.x, it.y, it.color); return; }
+      if (it.fire) { this._blast(it.x, it.y, it.blast, it.color); this._spawnFire(it.x, it.y, it.fireR || 80, it.fireDur || 3.2, it.color); return; }
       this._blast(it.x, it.y, it.blast, it.color);
       if (it.chain) this._chainZap(it.x, it.y, it.color, it.chain);
       if (it.cluster) {
@@ -445,6 +455,14 @@
     _spawnBlackhole(x, y, color) {
       this.blackholes.push({ x: x, y: y, t: 0, dur: 1.15, range: 200, color: color || "#c86bff" });
       this.audio.play("whoosh");   // black-hole forms with a swirling woosh
+      if (this.theme.effects.shake) this._shake(4);
+    }
+
+    // NAPALM leaves a roaring fire field: a circular zone that incinerates any enemy/UFO inside for fireDur seconds.
+    _spawnFire(x, y, r, dur, color) {
+      y = Math.min(y, this.groundY - 6);
+      this.fires.push({ x: x, y: y, r: r, dur: dur, t: 0, tick: 0, color: color || "#ff6a2a" });
+      this.audio.play("boom");
       if (this.theme.effects.shake) this._shake(4);
     }
 
@@ -528,6 +546,21 @@
         for (const m of this.enemies) { const dx = bh.x - m.x, dy = bh.y - m.y, d = Math.hypot(dx, dy) || 1; if (d < bh.range) { const fp = BH_PULL * (1 - d / bh.range); m.x += dx / d * fp * s; m.y += dy / d * fp * s; } }
         for (const u of this.ufos) { const dx = bh.x - u.x, dy = bh.y - u.y, d = Math.hypot(dx, dy) || 1; if (d < bh.range) { const fp = BH_PULL * 0.7 * (1 - d / bh.range); u.x += dx / d * fp * s; u.y += dy / d * fp * s; } }
         if (bh.t >= bh.dur) { this._blast(bh.x, bh.y, 130, bh.color); if (this.theme.effects.shake) this._shake(9); this.blackholes.splice(i, 1); }
+      }
+
+      // napalm fire fields: incinerate enemies/UFOs inside for a few seconds + lick flames
+      for (let i = this.fires.length - 1; i >= 0; i--) {
+        const f = this.fires[i]; f.t += s; f.tick -= dt;
+        if (f.tick <= 0) {
+          f.tick = 110;   // ~9 burn pulses / sec
+          const rr = f.r * (0.85 + 0.15 * Math.sin(f.t * 8));
+          for (let j = this.enemies.length - 1; j >= 0; j--) { const m = this.enemies[j]; if (Math.hypot(m.x - f.x, m.y - f.y) < rr) { this.enemies.splice(j, 1); this.score += 25 * this.wave; this._burst(m.x, m.y, "#ff8a3a", 7); } }
+          for (let j = this.ufos.length - 1; j >= 0; j--) { const u = this.ufos[j]; if (Math.hypot(u.x - f.x, u.y - f.y) < rr + u.radius) { this.ufos.splice(j, 1); const pts = 150 + this.wave * 25; this.score += pts; this._burst(u.x, u.y, "#ff8a3a", 20); this._toast("UFO! +" + pts, true); } }
+        }
+        if (this.theme.effects.particles && Math.random() < 0.9) { const a = Math.random() * Math.PI * 2, rd = Math.sqrt(Math.random()) * f.r;
+          this.particles.emit({ x: f.x + Math.cos(a) * rd, y: f.y + Math.sin(a) * rd * 0.55, count: 1, colors: ["#ffe14a", "#ff8a2a", "#ff4a1a"],
+            speedMin: 10, speedMax: 45, angleMin: -Math.PI * 0.72, angleMax: -Math.PI * 0.28, gravity: -40, drag: 1.3, sizeMin: 2, sizeMax: 5, lifeMin: 0.3, lifeMax: 0.7, glow: this.theme.effects.glow, shape: "circle" }); }
+        if (f.t >= f.dur) this.fires.splice(i, 1);
       }
 
       // interceptors
@@ -700,6 +733,7 @@
       for (const pu of this.powerups) R.drawPowerup(ctx, th, pu, now, WMAP[pu.weapon]);
       for (const it of this.interceptors) R.drawInterceptor(ctx, th, it);
       for (const ex of this.explosions) R.drawExplosion(ctx, th, ex);
+      for (const f of this.fires) R.drawFire(ctx, th, f, now);
       for (const z of this.zaps) R.drawZap(ctx, th, z);
       this.particles.render(ctx);
       R.drawCrosshair(ctx, th, this.aim.x, this.aim.y);
