@@ -315,7 +315,7 @@
       const p = theme.palette, gy = this.groundY;
       ctx.save();
       ctx.strokeStyle = p.person; ctx.fillStyle = p.person; ctx.lineWidth = 1.6; ctx.lineCap = "round";
-      const spots = [-17, 17];
+      const spots = panic ? [-25, -12, 2, 15, 27] : [-17, 17];   // a bigger crowd spills out when panicking
       for (let k = 0; k < spots.length; k++) {
         const ph = now / (panic ? 90 : 340) + k * 2.1;
         const run = panic ? Math.sin(ph) * 5 : 0;
@@ -325,8 +325,26 @@
         ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x, y - 2); ctx.stroke();
         const stride = panic ? Math.sin(ph * 3) * 2.6 : 0.9;
         ctx.beginPath(); ctx.moveTo(x, y - 2); ctx.lineTo(x - stride, y + 2); ctx.moveTo(x, y - 2); ctx.lineTo(x + stride, y + 2); ctx.stroke();
-        if (panic) { ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x - 3, y - 10); ctx.moveTo(x, y - 6); ctx.lineTo(x + 3, y - 10); ctx.stroke(); }
-        else { ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x - 2.5, y - 4); ctx.moveTo(x, y - 6); ctx.lineTo(x + 2.5, y - 4); ctx.stroke(); }
+        if (panic) {   // one arm holds a tiny gun pointed skyward, the other flails
+          const g = (k % 2 === 0) ? -1 : 1;
+          ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + g * 3, y - 9); ctx.stroke();
+          ctx.lineWidth = 2.3; ctx.beginPath(); ctx.moveTo(x + g * 3, y - 9); ctx.lineTo(x + g * 4.6, y - 13.5); ctx.stroke(); ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x - g * 3, y - 10.5); ctx.stroke();
+        } else { ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x - 2.5, y - 4); ctx.moveTo(x, y - 6); ctx.lineTo(x + 2.5, y - 4); ctx.stroke(); }
+      }
+      ctx.restore();
+    }
+
+    // harmless little gun tracers from panicking civilians
+    drawTracers(ctx, theme, tracers) {
+      if (!tracers || !tracers.length) return;
+      ctx.save();
+      this._glow(ctx, theme, "#ffd24a", theme.effects.glow ? 6 : 0);
+      ctx.strokeStyle = "#ffe066"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
+      for (const t of tracers) {
+        const sp = Math.hypot(t.vx, t.vy) || 1, len = 8;
+        ctx.globalAlpha = Math.max(0.2, Math.min(1, t.life * 2.6));
+        ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(t.x - t.vx / sp * len, t.y - t.vy / sp * len); ctx.stroke();
       }
       ctx.restore();
     }

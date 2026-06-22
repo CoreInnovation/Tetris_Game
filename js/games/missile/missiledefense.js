@@ -14,7 +14,7 @@
   const BAT_SLOTS = [0, 4, 8], CITY_SLOTS = [1, 2, 3, 5, 6, 7];
   const EJECT_V = 235, COLD_G = 540, EJECT_DELAY = 0.45;
   const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9;
-  const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000;
+  const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000, POW_FAVOR = 0.6;
   const HORNET_SPEED = 430, HORNET_TURN = 7.5, BH_PULL = 340, ZIG_AMP = 48;
 
   // Primitive stats only — reload/heat/cool are DERIVED below from a balance model.
@@ -119,6 +119,7 @@
       this.reload = {}; this.cdT = {}; this.heat = {}; this.idleT = {};
       WEAPONS.forEach(w => { this.reload[w.id] = 0; this.cdT[w.id] = 0; this.heat[w.id] = 0; this.idleT[w.id] = 9999; });
       this.multishot = 1; this.multishotT = 0;
+      this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(6000, 10000); this.ufoT = rand(11000, 17000);
       this.shakeMag = 0; this.flash = 0; this.toasts = [];
@@ -207,6 +208,7 @@
       this.spawnGap = Math.max(380, 1300 - this.wave * 90);
       this.spawnT = 800;
       this.enemySpeed = ENEMY_BASE + this.wave * 6;
+      this.explosions.length = 0; this.pendingBlasts.length = 0; this.blackholes.length = 0; this.tracers.length = 0;   // clean slate so last wave's ordnance can't hit the new one
       this._applyTempo();
       if (this.wave > 1) this._toast("WAVE " + this.wave, true);
     }
@@ -262,6 +264,17 @@
       if (this.theme.effects.particles) this.particles.emit({ x: pu.x, y: pu.y, count: 26,
         colors: [w.color || this.theme.palette.powerup, this.theme.palette.exhaust, "#ffffff"],
         speedMin: 50, speedMax: 280, gravity: 60, drag: 1, sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle", spin: 6 });
+    }
+
+    // a panicking civilian fires a harmless tracer up at the nearest incoming missile (does nothing — they're just trying!)
+    _spawnTracer(cx) {
+      let tx = cx, ty = 60, bd = 1e9;
+      for (const m of this.enemies) { const d = Math.abs(m.x - cx); if (d < bd) { bd = d; tx = m.x; ty = m.y; } }
+      const px = cx + rand(-22, 22), py = this.groundY - 9;
+      const dx = (tx - px) + rand(-26, 26), dy = (ty - py), d = Math.hypot(dx, dy) || 1, sp = rand(440, 600);
+      this.tracers.push({ x: px, y: py, vx: dx / d * sp, vy: dy / d * sp, life: rand(0.32, 0.6) });
+      if (this.theme.effects.particles && Math.random() < 0.5) this.particles.emit({ x: px, y: py - 2, count: 2, colors: ["#ffe08a", "#ffffff"],
+        speedMin: 8, speedMax: 46, gravity: 0, drag: 2.2, sizeMin: 1, sizeMax: 2, lifeMin: 0.08, lifeMax: 0.22, glow: this.theme.effects.glow, shape: "circle" });
     }
 
     // homing projectiles vacuum up any powerup they touch (the projectile keeps flying)
@@ -502,10 +515,11 @@
               if (trav >= 0.65 * tot) it._homeOn = true;   // flew ~65% of the way, NOW it can chase
             }
             if (it._homeOn) {
-              let bd = 1e9;
-              for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < bd) { bd = d; tgt = m; } }
-              for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < bd) { bd = d; tgt = u; } }
-              if (!tgt) for (const pu of this.powerups) { const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < bd) { bd = d; tgt = pu; } }   // sky's clear -> go grab a powerup
+              let tEn = null, eD = 1e9, tPow = null, pD = 1e9;
+              for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
+              for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
+              for (const pu of this.powerups) { const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < pD) { pD = d; tPow = pu; } }
+              tgt = (tPow && pD * POW_FAVOR <= eD) ? tPow : (tEn || tPow);   // favor powerups a little over enemies
               if (tgt) { it.tx = tgt.x; it.ty = tgt.y; }
             }
           }
@@ -537,10 +551,11 @@
             if (this.theme.effects.particles && Math.random() < 0.6) this.particles.emit({ x: it.x, y: it.y, count: 1, colors: ["#cfd0d6", it.color || "#ffffff"], speedMin: 2, speedMax: 18, gravity: 30, drag: 1.5, sizeMin: 1.2, sizeMax: 2.6, lifeMin: 0.25, lifeMax: 0.55, glow: false, shape: "circle" });
           }
         } else if (it.mode === "home") {
-          let tgt = null, bd = 1e9;
-          for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < bd) { bd = d; tgt = m; } }
-          for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < bd) { bd = d; tgt = u; } }
-          if (!tgt) for (const pu of this.powerups) { const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < bd) { bd = d; tgt = pu; } }   // no threats -> chase powerups
+          let tgt = null, bd = 1e9, tEn = null, eD = 1e9, tPow = null, pD = 1e9;
+          for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
+          for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
+          for (const pu of this.powerups) { const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < pD) { pD = d; tPow = pu; } }
+          if (tPow && pD * POW_FAVOR <= eD) { tgt = tPow; bd = pD; } else if (tEn) { tgt = tEn; bd = eD; } else if (tPow) { tgt = tPow; bd = pD; }   // favor powerups a little
           const aimx = tgt ? tgt.x : it.tx, aimy = tgt ? tgt.y : it.ty;
           let diff = Math.atan2(aimy - it.y, aimx - it.x) - it.heading; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2;
           const mt = HORNET_TURN * s; it.heading += Math.max(-mt, Math.min(mt, diff));
@@ -551,7 +566,7 @@
           let trig = false;
           if (tgt) { if (bd < 28) trig = true; else if (it.prevd != null && bd > it.prevd && bd < 95) trig = true; it.prevd = bd; }
           if (trig || it.fuse <= 0 || it.y > this.groundY) {
-            if (tgt && Math.hypot(tgt.x - it.x, tgt.y - it.y) < 60) {  // a homing missile reliably kills its mark
+            if (tgt && Math.hypot(tgt.x - it.x, tgt.y - it.y) < 95) {  // a homing missile reliably kills its mark (matches the flyby trigger radius)
               const ei = this.enemies.indexOf(tgt);
               if (ei >= 0) { this.enemies.splice(ei, 1); this.score += 25 * this.wave; this._burst(tgt.x, tgt.y, it.color, 7); }
               else { const ui = this.ufos.indexOf(tgt); if (ui >= 0) { this.ufos.splice(ui, 1); const pts = 150 + this.wave * 25; this.score += pts; this._toast("UFO! +" + pts, true); this._burst(tgt.x, tgt.y, "#46f0c0", 20); if (this.theme.effects.shake) this._shake(6); } }
@@ -591,9 +606,21 @@
         if (ex.r <= 0) this.explosions.splice(i, 1);
       }
 
-      for (const c of this.cities) { if (!c.alive) { c.panic = false; continue; } c.panic = this.enemies.some(m => Math.hypot(m.x - c.x, m.y - this.groundY) < PANIC_DIST); }
+      let anyPanic = false;
+      for (const c of this.cities) {
+        if (!c.alive) { c.panic = false; continue; }
+        c.panic = this.enemies.some(m => Math.hypot(m.x - c.x, m.y - this.groundY) < PANIC_DIST);
+        if (c.panic) { anyPanic = true; if (this.enemies.length && this.tracers.length < 64 && Math.random() < dt / 150) this._spawnTracer(c.x); }   // panicking folks plink away (harmless)
+      }
+      for (let i = this.tracers.length - 1; i >= 0; i--) { const tr = this.tracers[i]; tr.x += tr.vx * s; tr.y += tr.vy * s; tr.life -= s; if (tr.life <= 0 || tr.y < -12) this.tracers.splice(i, 1); }
+      if (anyPanic && !this._prevPanic) { this.sirenT = 0; this.crowdT = 0; }   // siren only re-arms on a genuine calm->panic transition (no flicker spam)
+      if (anyPanic) {
+        this.sirenT -= dt; if (this.sirenT <= 0) { this.audio.play("siren"); this.sirenT = 9000; }
+        this.crowdT -= dt; if (this.crowdT <= 0) { this.audio.play("crowd"); this.crowdT = rand(3000, 5500); }
+      }
+      this._prevPanic = anyPanic;
 
-      if (this.pending <= 0 && this.enemies.length === 0 && this.interceptors.length === 0 && this.explosions.length === 0 && this.pendingBlasts.length === 0 && this.ufos.length === 0 && this.blackholes.length === 0) {
+      if (this.pending <= 0 && this.enemies.length === 0 && this.ufos.length === 0) {   // advance as soon as all THREATS are down — don't wait for our own missiles/blasts to finish
         const aliveCities = this.cities.filter(c => c.alive).length;
         const bonus = aliveCities * 120;
         if (bonus > 0) { this.score += bonus; this._toast("+" + bonus + " BONUS", true); }
@@ -612,6 +639,7 @@
       ctx.save(); ctx.translate(sx, sy);
       for (const c of this.cities) { R.drawCity(ctx, th, c.x, c.alive); if (c.alive) R.drawPeople(ctx, th, c.x, c.panic, now); }
       for (const b of this.batteries) R.drawBattery(ctx, th, b.x, b.alive);
+      R.drawTracers(ctx, th, this.tracers);
       for (const bh of this.blackholes) R.drawBlackhole(ctx, th, bh);
       for (const m of this.enemies) R.drawEnemy(ctx, th, m);
       for (const u of this.ufos) R.drawUfo(ctx, th, u, now);

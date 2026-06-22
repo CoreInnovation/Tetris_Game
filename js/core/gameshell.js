@@ -122,6 +122,7 @@
       this._hide(this.refs.gameoverOverlay);
       this._hide(this.refs.gameView);
       this._hide(this.refs.backBtn);
+      this._hide(this.refs.pauseBtn);
       this._hide(this.refs.themeBtn);
       this._hide(this.refs.musicBtn);
       this._hide(this.refs.devBtn);
@@ -136,6 +137,7 @@
       this._hide(this.refs.menu);
       this._show(this.refs.gameView);
       this._show(this.refs.backBtn);
+      this._show(this.refs.pauseBtn);
 
       this.input.attach();
       this.input.setEnabled(true);
@@ -219,12 +221,15 @@
       this.refs.goBest.textContent = best.toLocaleString();
       this.refs.goNew.classList.toggle("hidden", !isNew);
       this.audio.play("gameover");
+      this._hide(this.refs.pauseOverlay);   // don't leave a pause overlay stacked under game-over
+      this._hide(this.refs.pauseBtn);       // pause is meaningless once the game is over
       this._show(this.refs.gameoverOverlay);
     }
 
     restartGame() {
       this._hide(this.refs.gameoverOverlay);
       this._hide(this.refs.pauseOverlay);
+      this._show(this.refs.pauseBtn);
       this._over = false;
       this._paused = false;
       if (this._game && this._game.restart) this._game.restart();
@@ -255,6 +260,7 @@
     // ---------------- DOM wiring ----------------
     _wireChrome() {
       this.refs.backBtn.addEventListener("click", () => this.showMenu());
+      if (this.refs.pauseBtn) this.refs.pauseBtn.addEventListener("click", () => { if (!this._over) this.togglePause(); });
       this.refs.soundBtn.addEventListener("click", () => {
         this.audio.unlock();
         this.audio.toggleMuted();
