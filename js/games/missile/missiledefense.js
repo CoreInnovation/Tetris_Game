@@ -73,6 +73,23 @@
   const SMAP = {}; STREAKS.forEach(s => SMAP[s.id] = s);
   M.STREAKS = STREAKS;
 
+  // ---- ENEMY KINDS: distinct falling threats, introduced as waves climb ----
+  const ENEMY_KINDS = [
+    { id: "basic",     name: "MISSILE",      introWave: 1,  weight: 10, pattern: "straight",      speedMul: 1.0,  amp: 0,   freq: 0,  size: 2.6, color: null },
+    { id: "dart",      name: "PLASMA DART",  introWave: 2,  weight: 9,  pattern: "straight_fast", speedMul: 1.85, amp: 0,   freq: 0,  size: 3,   color: "#ff4d4d" },
+    { id: "drifter",   name: "DRIFTER MINE", introWave: 3,  weight: 8,  pattern: "drift",         speedMul: 0.65, amp: 0,   freq: 0,  size: 5,   color: "#5bd1c9" },
+    { id: "viper",     name: "VIPER",        introWave: 4,  weight: 7,  pattern: "zigzag_sharp",  speedMul: 1.1,  amp: 75,  freq: 9,  size: 4,   color: "#ffd23f" },
+    { id: "corkscrew", name: "CORKSCREW",    introWave: 5,  weight: 6,  pattern: "corkscrew",     speedMul: 1.0,  amp: 42,  freq: 7,  size: 4,   color: "#b06bff" },
+    { id: "screamer",  name: "SCREAMER",     introWave: 6,  weight: 6,  pattern: "accelerate",    speedMul: 0.55, amp: 0,   freq: 0,  size: 4,   color: "#ff8c1a" },
+    { id: "swarm",     name: "WASP SWARM",   introWave: 7,  weight: 5,  pattern: "cluster_swarm", speedMul: 1.2,  amp: 18,  freq: 14, size: 2.5, color: "#9dff3c" },
+    { id: "behemoth",  name: "BEHEMOTH",     introWave: 8,  weight: 3,  pattern: "heavy_bomber",  speedMul: 0.45, amp: 0,   freq: 0,  size: 9,   color: "#ff3838" },
+    { id: "hydra",     name: "HYDRA",        introWave: 10, weight: 4,  pattern: "split_mirv",    speedMul: 0.95, amp: 0,   freq: 0,  size: 6,   color: "#ff5fa2" },
+    { id: "mimic",     name: "MIMIC",        introWave: 12, weight: 4,  pattern: "decoy",         speedMul: 1.0,  amp: 0,   freq: 0,  size: 4,   color: "#c0c4cc" },
+    { id: "serpent",   name: "SKY SERPENT",  introWave: 14, weight: 3,  pattern: "squiggle",      speedMul: 0.8,  amp: 175, freq: 4,  size: 6,   color: "#3fe0ff" }
+  ];
+  const KMAP = {}; ENEMY_KINDS.forEach(k => KMAP[k.id] = k);
+  M.ENEMY_KINDS = ENEMY_KINDS;
+
   const MD_CLASSIC = {
     bpm: 100, volume: 0.16,
     tracks: [
@@ -289,6 +306,7 @@
       this.explosions.length = 0; this.pendingBlasts.length = 0; this.blackholes.length = 0; this.tracers.length = 0;   // clean slate so last wave's ordnance can't hit the new one
       this._applyTempo();
       if (this.wave > 1) this._toast("WAVE " + this.wave, true);
+      for (const k of ENEMY_KINDS) if (k.introWave === this.wave && this.wave > 1) this._toast("NEW THREAT — " + k.name, false, k.color || this.theme.palette.enemy);   // herald each new enemy type
       const rf = Math.round((1 - this._cooldownScale()) * 100);   // weapons cool/reload this much faster now
       if (this.wave > 1 && this.wave % 3 === 0 && rf > 0) this._toast("RAPID FIRE  ·  weapons " + rf + "% faster", false, "#ffe14d");
     }
@@ -300,16 +318,38 @@
       return t;
     }
 
-    _spawnEnemy(sx, sy, target) {
+    _rollKind() {
+      const pool = [];
+      for (const k of ENEMY_KINDS) { if (k.introWave > this.wave) continue; for (let i = 0; i < k.weight; i++) pool.push(k); }
+      return pool.length ? pool[(Math.random() * pool.length) | 0] : KMAP.basic;
+    }
+    _nearestTarget(x) { const t = this._aliveTargets(); if (!t.length) return null; let best = t[0], bd = 1e9; for (const c of t) { const d = Math.abs(c.x - x); if (d < bd) { bd = d; best = c; } } return best; }
+
+    _spawnEnemy(sx, sy, target, forceKind) {
       const targets = this._aliveTargets();
-      if (!targets.length) return;
+      if (!targets.length) return null;
       if (sx == null) { sx = rand(20, this._w - 20); sy = 0; }
       if (!target) target = targets[(Math.random() * targets.length) | 0];
+      const def = forceKind ? (KMAP[forceKind] || KMAP.basic) : this._rollKind();
+      const spd = this.enemySpeed * def.speedMul;
       const dx = target.x - sx, dy = this.groundY - sy, d = Math.hypot(dx, dy) || 1;
-      const m = { sx: sx, sy: sy, x: sx, y: sy, vx: dx / d * this.enemySpeed, vy: dy / d * this.enemySpeed, splitY: null, slow: 0, zig: false };
-      if (this.wave >= 3 && Math.random() < 0.24) m.splitY = rand(this._h * 0.3, this._h * 0.5);
-      else if (this.wave >= 2 && Math.random() < 0.28) { m.zig = true; m.zphase = rand(0, 6.28); }
+      const m = { kind: def.id, def: def, sx: sx, sy: sy, cx: sx, cy: sy, x: sx, y: sy,
+        vx: dx / d * spd, vy: dy / d * spd, spd0: spd, slow: 0, t: 0, phase: rand(0, 6.28), amp: def.amp, freq: def.freq, splitY: null };
+      if (def.pattern === "drift") { m.vx = (Math.random() < 0.5 ? -1 : 1) * rand(75, 145); m.vy = spd; }   // always crosses the sky on a lazy diagonal
+      else if (def.pattern === "accelerate") m.accel = 1.9;
+      else if (def.pattern === "decoy") { m.awake = false; m.wakeY = rand(this.groundY * 0.45, this.groundY * 0.60); m.vx *= 0.3; }
+      else if (def.id === "hydra") m.splitY = rand(this.groundY * 0.40, this.groundY * 0.55);
+      if (def.id === "behemoth") m.heavy = true;
       this.enemies.push(m);
+      if (def.pattern === "cluster_swarm" && !forceKind) {   // the rest of the pack arrives together in a tight cluster
+        for (let k = 0, n = 5 + ((Math.random() * 3) | 0); k < n; k++) this._spawnEnemy(sx + rand(-34, 34), rand(-60, -4), target, "swarm");
+      }
+      return m;
+    }
+
+    _hydraSplit(m) {
+      this._burst(m.x, m.y, "#ff7fc2", 12);
+      for (let i = 0; i < 5; i++) { const c = this._spawnEnemy(m.x, Math.min(m.cy, this.groundY - 40), null, "basic"); if (c) c.vx = m.vx + (i - 2) * 90; }
     }
 
     _spawnPowerup() {
@@ -564,17 +604,14 @@
       this.audio.play("boom"); this._toast("🌋 VOLCANO ERUPTION!", true);
     }
 
-    _destroyStructure(x) {
-      let hit = null, hd = this.slotW * 0.55;
-      for (const c of this.cities) if (c.alive && Math.abs(c.x - x) < hd) { hit = c; break; }
-      if (!hit) for (const b of this.batteries) if (b.alive && Math.abs(b.x - x) < hd) { hit = b; break; }
-      if (hit) {
-        hit.alive = false;
-        this._blast(hit.x, this.groundY - 8, 46);
-        if (this.theme.effects.shake) this._shake(9);
-        this.flash = 1; this._burst(hit.x, this.groundY - 8, this.theme.palette.enemy, 26);
-        if (this.cities.every(c => !c.alive)) this._gameOver();
-      }
+    _destroyStructure(x, heavy) {
+      const hd = this.slotW * (heavy ? 1.35 : 0.55);
+      let hits = [...this.cities, ...this.batteries].filter(o => o.alive && Math.abs(o.x - x) < hd);
+      if (!heavy && hits.length > 1) { hits.sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x)); hits = hits.slice(0, 1); }   // normal: just the nearest structure
+      for (const hit of hits) { hit.alive = false; this._blast(hit.x, this.groundY - 8, heavy ? 64 : 46, heavy ? "#ff3838" : null); this._burst(hit.x, this.groundY - 8, this.theme.palette.enemy, heavy ? 34 : 26); }
+      if (hits.length || heavy) { if (this.theme.effects.shake) this._shake(heavy ? 14 : 9); this.flash = 1; }
+      if (heavy && !hits.length) this._blast(x, this.groundY - 8, 64, "#ff3838");   // big boom even on empty ground
+      if (this.cities.every(c => !c.alive)) this._gameOver();
     }
 
     _burst(x, y, color, count) {
@@ -618,20 +655,30 @@
       if (!this.betweenWaves && this.multishotT > 0) { this.multishotT -= dt; if (this.multishotT <= 0) { this.multishot = 1; this.multishotT = 0; this._toast("MULTI-FIRE OFF"); } }   // don't burn powerup time during the wave breather
       this.ufoT -= dt; if (this.ufoT <= 0 && this.wave >= 2 && this.ufos.length < 1) { this._spawnUfo(); this.ufoT = rand(14000, 24000); }
 
-      // enemies
+      // enemies (each kind moves differently; the "spine" cx/cy tracks the target, x/y add the weave)
       for (let i = this.enemies.length - 1; i >= 0; i--) {
-        const m = this.enemies[i];
+        const m = this.enemies[i], pat = m.def ? m.def.pattern : "straight";
         const f = (m.slow > 0) ? SLOW_FACTOR : 1; if (m.slow > 0) m.slow -= s;
-        m.x += m.vx * f * s; m.y += m.vy * f * s;
-        if (m.zig) m.x += Math.cos(now * 0.006 + m.zphase) * ZIG_AMP * f * s;
-        if (m.splitY != null && m.y >= m.splitY) { m.splitY = null; const n = 1 + ((Math.random() * 2) | 0); for (let k = 0; k < n; k++) this._spawnEnemy(m.x, m.y); }
-        if (m.y >= this.groundY) { this._destroyStructure(m.x); this.enemies.splice(i, 1); }
+        m.t += s;
+        if (pat === "accelerate" && m.accel) { const cap = m.spd0 * 2.6; if (Math.hypot(m.vx, m.vy) < cap) { const g = 1 + m.accel * s; m.vx *= g; m.vy *= g; } }
+        else if (pat === "drift") m.vx *= (1 - 0.12 * s);   // sideways glide gradually straightens
+        else if (pat === "heavy_bomber" && m.cy > this.groundY * 0.8) m.vy *= (1 + 0.5 * s);
+        else if (pat === "decoy" && !m.awake && m.cy >= m.wakeY) { m.awake = true; const t = this._nearestTarget(m.cx); if (t) { const ax = t.x - m.cx, ay = this.groundY - m.cy, ad = Math.hypot(ax, ay) || 1, sp = m.spd0 * 1.3; m.vx = ax / ad * sp; m.vy = ay / ad * sp; } this._burst(m.x, m.y, "#ff5a5a", 6); }
+        m.cx += m.vx * f * s; m.cy += m.vy * f * s;
+        let offX = 0, offY = 0;
+        if (pat === "squiggle") offX = Math.sin(m.cy * m.freq * 0.008 + m.phase) * m.amp;
+        else if (pat === "corkscrew") { offX = Math.cos(m.cy * m.freq * 0.01 + m.phase) * m.amp; offY = Math.sin(m.cy * m.freq * 0.01 + m.phase) * m.amp * 0.25; }
+        else if (pat === "zigzag_sharp") { const seg = 46, pp = Math.floor(m.cy / seg), fr = (m.cy % seg) / seg; offX = ((pp & 1) ? 1 : -1) * m.amp * fr; }
+        else if (pat === "cluster_swarm") offX = Math.sin(m.t * m.freq + m.phase) * m.amp;
+        m.x = Math.max(6, Math.min(this._w - 6, m.cx + offX)); m.y = m.cy + offY;
+        if (m.splitY != null && m.cy >= m.splitY) { this._hydraSplit(m); this.enemies.splice(i, 1); continue; }
+        if (m.cy >= this.groundY) { this._destroyStructure(m.x, m.heavy); this.enemies.splice(i, 1); }
       }
 
       // UFO spaceships
       for (let i = this.ufos.length - 1; i >= 0; i--) {
         const u = this.ufos[i]; u.zig += s; u.x += u.vx * s; u.y += Math.sin(u.zig * 2) * 14 * s;
-        u.bombT -= dt; if (u.bombT <= 0) { this._spawnEnemy(u.x, u.y, null); u.bombT = rand(1300, 2400); }
+        u.bombT -= dt; if (u.bombT <= 0) { this._spawnEnemy(u.x, u.y, null, "dart"); u.bombT = rand(1300, 2400); }
         if (u.x < -50 || u.x > this._w + 50) this.ufos.splice(i, 1);
       }
 

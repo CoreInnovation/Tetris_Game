@@ -57,15 +57,40 @@
     }
 
     drawEnemy(ctx, theme, m) {
-      const p = theme.palette;
-      const slowed = m.slow > 0;
-      const col = slowed ? "#bfeaff" : (m.zig ? "#c06bff" : p.enemy), head = slowed ? "#eaffff" : (m.zig ? "#e6c6ff" : p.enemyHead);
+      const p = theme.palette, TAU = Math.PI * 2, slowed = m.slow > 0, def = m.def || {}, kind = m.kind || "basic";
+      const col = slowed ? "#bfeaff" : (def.color || p.enemy);
+      const head = slowed ? "#eaffff" : (def.color || p.enemyHead);
+      const sz = def.size || 2.6;
       ctx.save();
+      if (kind === "serpent") {   // big glowing sine ribbon sampled along its fall path
+        this._glow(ctx, theme, col, theme.effects.glow ? 16 : 0);
+        ctx.lineJoin = "round"; ctx.lineCap = "round";
+        const N = 18, y0 = m.sy, y1 = m.cy;
+        for (let pass = 0; pass < 2; pass++) {
+          ctx.strokeStyle = pass ? "#eaffff" : col; ctx.lineWidth = pass ? 1.6 : 4;
+          ctx.beginPath();
+          for (let i = 0; i <= N; i++) { const yy = y0 + (y1 - y0) * (i / N), xx = Math.max(6, Math.min(this.w - 6, m.cx + Math.sin(yy * m.freq * 0.008 + m.phase) * m.amp)); if (i === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy); }
+          ctx.stroke();
+        }
+        ctx.fillStyle = "#eaffff"; ctx.beginPath(); ctx.arc(m.x, m.y, sz, 0, TAU); ctx.fill();
+        ctx.restore(); return;
+      }
+      // streak trail
       this._glow(ctx, theme, col, theme.effects.glow ? 8 : 0);
-      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.strokeStyle = (kind === "mimic" && !m.awake) ? "rgba(170,176,188,0.4)" : col; ctx.lineWidth = (kind === "behemoth") ? 3 : (kind === "dart") ? 1.5 : 2;
       ctx.beginPath(); ctx.moveTo(m.sx, m.sy); ctx.lineTo(m.x, m.y); ctx.stroke();
-      ctx.fillStyle = head; this._glow(ctx, theme, col, theme.effects.glow ? 12 : 0);
-      ctx.beginPath(); ctx.arc(m.x, m.y, slowed ? 3.2 : 2.6, 0, Math.PI * 2); ctx.fill();
+      // head per kind
+      this._glow(ctx, theme, col, theme.effects.glow ? 12 : 0);
+      ctx.fillStyle = head; ctx.strokeStyle = col;
+      if (kind === "dart") { const a = Math.atan2(m.vy, m.vx); ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(a); ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(-4, -3); ctx.lineTo(-4, 3); ctx.closePath(); ctx.fill(); ctx.restore(); }
+      else if (kind === "drifter") { ctx.beginPath(); ctx.arc(m.x, m.y, sz, 0, TAU); ctx.fill(); ctx.lineWidth = 1.5; for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; ctx.beginPath(); ctx.moveTo(m.x + Math.cos(a) * sz, m.y + Math.sin(a) * sz); ctx.lineTo(m.x + Math.cos(a) * (sz + 4), m.y + Math.sin(a) * (sz + 4)); ctx.stroke(); } }
+      else if (kind === "viper") { ctx.save(); ctx.translate(m.x, m.y); ctx.beginPath(); ctx.moveTo(0, -sz); ctx.lineTo(sz, 0); ctx.lineTo(0, sz); ctx.lineTo(-sz, 0); ctx.closePath(); ctx.fill(); ctx.restore(); }
+      else if (kind === "corkscrew") { ctx.beginPath(); ctx.arc(m.x, m.y, sz, 0, TAU); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = "#e6c6ff"; ctx.beginPath(); ctx.arc(m.x, m.y, sz + 2.5, 0, TAU); ctx.stroke(); }
+      else if (kind === "screamer") { const a = Math.atan2(m.vy, m.vx); ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(a); ctx.beginPath(); ctx.moveTo(sz, 0); ctx.lineTo(-sz * 2, -sz * 0.6); ctx.lineTo(-sz * 2, sz * 0.6); ctx.closePath(); ctx.fill(); ctx.restore(); }
+      else if (kind === "behemoth") { ctx.beginPath(); ctx.arc(m.x, m.y, sz, 0, TAU); ctx.fill(); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(m.x, m.y, sz + 3, 0, TAU); ctx.stroke(); ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.arc(m.x, m.y, sz + 7, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1; }
+      else if (kind === "hydra") { ctx.beginPath(); ctx.arc(m.x, m.y, sz, 0, TAU); ctx.fill(); ctx.fillStyle = "#ffb0d8"; for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + k * (TAU / 5); ctx.beginPath(); ctx.arc(m.x + Math.cos(a) * sz, m.y + Math.sin(a) * sz, 1.5, 0, TAU); ctx.fill(); } }
+      else if (kind === "mimic") { if (!m.awake) { ctx.globalAlpha = 0.75; ctx.lineWidth = 1; ctx.strokeStyle = "#aab0bc"; ctx.beginPath(); ctx.arc(m.x, m.y, sz, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1; } else { ctx.fillStyle = "#ff5a5a"; ctx.beginPath(); ctx.arc(m.x, m.y, sz, 0, TAU); ctx.fill(); } }
+      else { ctx.beginPath(); ctx.arc(m.x, m.y, slowed ? 3.2 : sz, 0, TAU); ctx.fill(); }
       ctx.restore();
     }
 
