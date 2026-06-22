@@ -208,6 +208,17 @@
         case "crowd":    this._crowd(); break;
         case "zap":      this._tone(2300, 0.05, "square", 0.10, 900); this._tone(1500, 0.08, "sawtooth", 0.08, 480); this._noise(0.09, 0.07); break;
         case "whoosh":   this._tone(700, 0.5, "sine", 0.14, 90); this._tone(430, 0.55, "triangle", 0.09, 60); this._noise(0.5, 0.05); break;
+        // DEADGRID (zombie horde)
+        case "zhit":     this._tone(220, 0.06, "square", 0.10, 140); this._noise(0.04, 0.06); break;
+        case "zdeath":   this._tone(160, 0.25, "sawtooth", 0.16, 50); this._noise(0.22, 0.12); break;
+        case "hurt":     this._tone(330, 0.18, "triangle", 0.20, 110); this._noise(0.10, 0.07); break;
+        case "reload":   this._tone(800, 0.03, "square", 0.12); setTimeout(() => this._tone(600, 0.03, "square", 0.12), 80); break;
+        case "buy":      this._tone(1046, 0.06, "square", 0.14); setTimeout(() => this._tone(1568, 0.08, "square", 0.14, 1720), 60); break;
+        case "dash":     this._tone(200, 0.18, "sine", 0.10, 90); this._noise(0.2, 0.10); break;
+        case "pickup":   this._tone(660, 0.10, "sine", 0.14, 990); break;
+        case "bossroar": this._tone(70, 0.8, "sawtooth", 0.24, 35); this._tone(73, 0.8, "sawtooth", 0.18, 36); this._noise(0.9, 0.14); break;
+        case "wavestart": this._tone(110, 0.5, "sawtooth", 0.16, 230); this._noise(0.4, 0.06); break;
+        case "frost":    this._tone(1200, 0.3, "sine", 0.12, 380); this._noise(0.12, 0.05); break;
         default: break;
       }
     }

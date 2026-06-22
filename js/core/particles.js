@@ -33,6 +33,11 @@
 
     clear() { this._list.length = 0; }
 
+    /** Shift every live particle by (dx,dy) px. Lets a camera-scrolling game
+        keep screen-space particles pinned to world points (call each frame
+        with the camera's screen delta). */
+    shiftAll(dx, dy) { if (!dx && !dy) return; const l = this._list; for (let i = 0; i < l.length; i++) { l[i].x += dx; l[i].y += dy; } }
+
     /** Emit `count` particles around (x,y) using a config of ranges. */
     emit(cfg) {
       const n = cfg.count || 10;
