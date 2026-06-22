@@ -110,8 +110,7 @@
       this._unsub = [];
       this.paused = false;
       this.state = "playing"; // playing | clearing | over
-      this.touchLayout = "gamepad";   // NES-style: ◀ ▶ / ▼ d-pad on the left, Rotate + Drop on the right
-      this.touchLabels = { left: "◀", right: "▶", soft: "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" };
+      this._ctrl = ctx.storage.get("tetris:ctrl", "gamepad");   // gamepad (2-thumb) | thumb-r | thumb-l
 
       this._bindInput();
     }
@@ -202,6 +201,22 @@
       this.shell.storage.set("tetris:theme", this.theme.id);
       if (!this.theme.effects.particles) this.particles.clear();
       return this.theme.name;
+    }
+
+    // touch layout follows the chosen control profile (gamepad d-pad, or a one-thumb corner cluster)
+    get touchLayout() { return this._ctrl === "thumb-l" ? "onethumb onethumb-left" : this._ctrl === "thumb-r" ? "onethumb onethumb-right" : "gamepad"; }
+    get touchLabels() { const one = this._ctrl !== "gamepad"; return { left: "◀", right: "▶", soft: one ? "" : "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" }; }
+    menus() {
+      const self = this, SG = T.SONGS;
+      return {
+        control: {
+          profiles: [{ id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }],
+          profile: this._ctrl,
+          setProfile: (id) => { self._ctrl = id; self.shell.storage.set("tetris:ctrl", id); }
+        },
+        music: { options: SG.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("tetris:song", i); self._applyMusic(); } },
+        skin: { options: T.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = T.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("tetris:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
+      };
     }
 
     // ---------------- input ----------------

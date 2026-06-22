@@ -165,12 +165,7 @@
       this._updateDevIcon();
 
       // Touch buttons: shown for games that use them; pointer-driven games opt out.
-      if (this.isTouch && !this._game.pointerInput) {
-        this._applyTouchLabels(this._game);
-        this.refs.touchControls.classList.remove("gamepad", "flippers");
-        if (this._game.touchLayout) this.refs.touchControls.classList.add(this._game.touchLayout);
-        this._show(this.refs.touchControls);
-      } else this._hide(this.refs.touchControls);
+      this._refreshTouchLayout();
 
       this._game.start();
       this._game.resize(this._cssW, this._cssH, this._touchInset());
@@ -271,6 +266,18 @@
     // ---------------- options chooser (controls / music / skin modals) ----------------
     _gameMenus() { return (this._game && typeof this._game.menus === "function") ? this._game.menus() : null; }
 
+    // (Re)apply the shared touch bar's labels + layout class for the current game (handles live profile switches).
+    _refreshTouchLayout() {
+      const tc = this.refs.touchControls;
+      tc.classList.remove("gamepad", "flippers", "onethumb", "onethumb-left", "onethumb-right");
+      if (this._game && this.isTouch && !this._game.pointerInput) {
+        this._applyTouchLabels(this._game);
+        const lay = this._game.touchLayout;
+        if (lay) String(lay).split(/\s+/).forEach(c => c && tc.classList.add(c));
+        this._show(tc);
+      } else this._hide(tc);
+    }
+
     _openChooser(kind) { this.audio.unlock(); this._chooserKind = kind; this._renderChooser(); this._show(this.refs.chooserOverlay); }
     _closeChooser() { this._hide(this.refs.chooserOverlay); }
     _renderChooser() {
@@ -284,7 +291,7 @@
       else if (kind === "skin" && menus.skin) menus.skin.options.forEach(o => btn(o.name, o.id === menus.skin.current, () => { menus.skin.set(o.id); this._closeChooser(); }));
       else if (kind === "control" && menus.control) {
         const c = menus.control;
-        if (c.profiles) { label("Layout"); c.profiles.forEach(o => btn(o.name, o.id === c.profile, () => { c.setProfile(o.id); this._renderChooser(); })); }
+        if (c.profiles) { label("Layout"); c.profiles.forEach(o => btn(o.name, o.id === c.profile, () => { c.setProfile(o.id); this._refreshTouchLayout(); if (this._game.resize) this._game.resize(this._cssW, this._cssH, this._touchInset()); this._renderChooser(); })); }
         if (c.toggles) { label("Options"); c.toggles.forEach(t => btn(t.name + (t.on ? "   ✓" : "   ✕"), t.on, () => { t.set(!t.on); this._renderChooser(); })); }
       } else this._closeChooser();
     }
