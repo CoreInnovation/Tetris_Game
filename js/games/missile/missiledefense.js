@@ -59,6 +59,18 @@
   })();
   const WMAP = {}; WEAPONS.forEach(w => WMAP[w.id] = w);
   M.WEAPONS = WEAPONS;
+  // rail gun was a touch underpowered: more shots before overheat + a shorter overheat lockout
+  WMAP.railgun.mag = 14; WMAP.railgun.cd = 700;
+
+  // ---- KILLSTREAKS: collectible super-weapons earned by kills; they STACK on the right side ----
+  const STREAK_EVERY = 18, STREAK_MAX = 5;
+  const STREAKS = [
+    { id: "nuke",   name: "NUKE",          icon: "☢", color: "#ffe14d" },   // ☢ — huge half-screen blast
+    { id: "drone",  name: "DRONE STRIKE",  icon: "✈", color: "#7afcff" },   // ✈ — flies in, rains mini-missiles
+    { id: "meteor", name: "METEOR SHOWER", icon: "☄", color: "#ff7a3a" }    // ☄ — fireballs rain across the map
+  ];
+  const SMAP = {}; STREAKS.forEach(s => SMAP[s.id] = s);
+  M.STREAKS = STREAKS;
 
   const MD_CLASSIC = {
     bpm: 100, volume: 0.16,
@@ -116,6 +128,7 @@
       this.cities = CITY_SLOTS.map(s => ({ slot: s, alive: true, x: 0, panic: false }));
       this.enemies = []; this.interceptors = []; this.explosions = []; this.powerups = [];
       this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = []; this.fires = []; this.napGlobs = [];
+      this.streaks = []; this.streakKills = 0; this.streakRects = []; this.drones = []; this.droneShots = []; this.meteors = []; this.meteorN = 0; this.meteorT = 0;
       this.weapon = "interceptor";
       this.unlocked = { interceptor: true };
       this.collected = ["interceptor"];   // up to 4 held weapons (non-dev inventory)
@@ -183,6 +196,7 @@
         if (code === "Space") this._fire(this.aim.x, this.aim.y);
         else if (code === "KeyQ") this._selectWeapon(this._prevUnlocked());
         else if (code === "KeyE") this._selectWeapon(this._nextUnlocked());
+        else if (code === "KeyR") this._useStreak(0);   // unleash your oldest killstreak
       }));
       const toLocal = (e) => {
         const r = canvas.getBoundingClientRect();
@@ -193,6 +207,7 @@
         if (this.paused || this.state !== "playing") return; e.preventDefault();
         const p = toLocal(e);
         for (const ch of this.weaponChips) { if (p.x >= ch.x && p.x <= ch.x + ch.w && p.y >= ch.y && p.y <= ch.y + ch.h) { this._selectWeapon(ch.id); return; } }
+        for (let k = 0; k < this.streakRects.length; k++) { const r = this.streakRects[k]; if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) { this._useStreak(k); return; } }   // tap a streak chip to unleash it
         this.aim.x = p.x; this.aim.y = p.y; this._fire(p.x, p.y);
       };
       canvas.addEventListener("pointermove", this._pm);
@@ -407,8 +422,8 @@
       }
     }
 
-    _blast(x, y, maxR, color) {
-      this.explosions.push({ x: x, y: y, r: 0, maxR: maxR, phase: "grow", color: color || this.theme.palette.blast });
+    _blast(x, y, maxR, color, growMul) {
+      this.explosions.push({ x: x, y: y, r: 0, maxR: maxR, phase: "grow", color: color || this.theme.palette.blast, gw: BLAST_GROW * (growMul || 1) });
       this.audio.play("boom");
       if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: Math.round(maxR / 3),
         colors: [color || this.theme.palette.blast, "#ffffff"], speedMin: 40, speedMax: maxR * 4, gravity: 60, drag: 1,
@@ -448,7 +463,7 @@
         if (best < 0) break;
         used[best] = 1; const m = this.enemies[best]; pts.push({ x: m.x, y: m.y }); cx = m.x; cy = m.y; hit.push(best);
       }
-      hit.sort((a, b) => b - a).forEach(k => { const m = this.enemies[k]; this.score += 25 * this.wave; this._burst(m.x, m.y, color, 6); this.enemies.splice(k, 1); });
+      hit.sort((a, b) => b - a).forEach(k => { const m = this.enemies[k]; this.score += 25 * this.wave; this._addKill(); this._burst(m.x, m.y, color, 6); this.enemies.splice(k, 1); });
       if (pts.length > 1) { this.zaps.push({ points: pts, life: 0.22, color: color || "#b388ff" }); this.audio.play("zap"); if (this.theme.effects.shake) this._shake(3); }
     }
 
@@ -477,6 +492,40 @@
       }
       if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: 16, colors: ["#ffe14a", "#ff8a2a", "#ff4a1a"],
         speedMin: 60, speedMax: 320, gravity: 200, drag: 1, sizeMin: 2, sizeMax: 4.5, lifeMin: 0.3, lifeMax: 0.8, glow: this.theme.effects.glow, shape: "circle" });
+    }
+
+    // ---------------- killstreaks ----------------
+    _addKill() {
+      this.streakKills++;
+      if (this.streakKills >= STREAK_EVERY && this.streaks.length < STREAK_MAX) { this.streakKills = 0; this._earnStreak(); }
+      if (this.streaks.length >= STREAK_MAX) this.streakKills = Math.min(this.streakKills, STREAK_EVERY);   // hold "ready" until a slot frees
+    }
+    _earnStreak() {
+      const s = STREAKS[(Math.random() * STREAKS.length) | 0];
+      this.streaks.push(s.id); this.audio.play("extralife");
+      this._toast("KILLSTREAK!  " + s.name + " READY →", true);
+    }
+    _useStreak(idx) {
+      if (idx < 0 || idx >= this.streaks.length) return;
+      const id = this.streaks.splice(idx, 1)[0];
+      if (this.streakKills >= STREAK_EVERY && this.streaks.length < STREAK_MAX) { this.streakKills = 0; this._earnStreak(); }   // grant the held one now that a slot freed
+      if (id === "nuke") this._nukeStrike();
+      else if (id === "drone") this._droneStrike();
+      else if (id === "meteor") this._meteorShower();
+    }
+    _nukeStrike() {
+      const cx = this._w / 2, cy = this._h * 0.42;
+      this._blast(cx, cy, this._w * 0.48, "#ffe14d", 4.5);   // HUGE ~half-screen blast that expands FAST
+      this.flash = 1; if (this.theme.effects.shake) this._shake(16);
+      this._toast("☢ NUKE!", true);
+    }
+    _droneStrike() {
+      const fromLeft = Math.random() < 0.5;
+      this.drones.push({ x: fromLeft ? -60 : this._w + 60, y: this._h * rand(0.13, 0.24), vx: (fromLeft ? 1 : -1) * (this._w / 2.0), fireT: 180, shots: 16, color: "#7afcff" });
+      this.audio.play("ufo"); this._toast("✈ DRONE STRIKE INBOUND!", true);
+    }
+    _meteorShower() {
+      this.meteorN = 16; this.meteorT = 0; this.audio.play("whoosh"); this._toast("☄ METEOR SHOWER!", true);
     }
 
     _destroyStructure(x) {
@@ -569,14 +618,38 @@
         if (gb.fuse <= 0 || gb.y >= this.groundY - 4) { this._spawnFire(gb.x, Math.min(gb.y, this.groundY - 4), rand(30, 46), gb.dur * rand(0.55, 0.8), gb.color, true); this.napGlobs.splice(i, 1); }
       }
 
+      // killstreak: DRONE STRIKE — drone flies across, rains mini-missiles at random enemies
+      for (let i = this.drones.length - 1; i >= 0; i--) {
+        const d = this.drones[i]; d.x += d.vx * s; d.fireT -= dt;
+        if (d.fireT <= 0 && d.shots > 0 && this.enemies.length) {
+          const m = this.enemies[(Math.random() * this.enemies.length) | 0];
+          this.droneShots.push({ x: d.x, y: d.y + 6, tx: m.x, ty: m.y, sp: 760, color: d.color }); d.shots--; d.fireT = rand(80, 150); this.audio.play("rail");
+        }
+        if (d.x < -90 || d.x > this._w + 90) this.drones.splice(i, 1);
+      }
+      for (let i = this.droneShots.length - 1; i >= 0; i--) {
+        const ds = this.droneShots[i], dx = ds.tx - ds.x, dy = ds.ty - ds.y, dd = Math.hypot(dx, dy) || 1, step = ds.sp * s;
+        if (dd <= step + 6) { this._blast(ds.tx, ds.ty, 46, ds.color); this.droneShots.splice(i, 1); }
+        else { ds.x += dx / dd * step; ds.y += dy / dd * step; }
+      }
+      // killstreak: METEOR SHOWER — fireballs rain across the whole map, exploding on impact
+      if (this.meteorN > 0) { this.meteorT -= dt; if (this.meteorT <= 0) { this.meteorT = rand(70, 130); this.meteorN--; this.meteors.push({ x: rand(this._w * 0.06, this._w * 0.94), y: -20, vx: rand(-40, 40), vy: rand(260, 360), color: "#ff7a3a" }); } }
+      for (let i = this.meteors.length - 1; i >= 0; i--) {
+        const mt = this.meteors[i]; mt.vy += 380 * s; mt.x += mt.vx * s; mt.y += mt.vy * s;
+        if (this.theme.effects.particles && Math.random() < 0.6) this.particles.emit({ x: mt.x, y: mt.y, count: 1, colors: ["#ffd24a", "#ff7a2a", "#ff3a1a"], speedMin: 5, speedMax: 26, gravity: 60, drag: 1.4, sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.2, lifeMax: 0.5, glow: this.theme.effects.glow, shape: "circle" });
+        let impact = mt.y >= this.groundY - 4;
+        if (!impact) for (const m of this.enemies) { if (Math.hypot(m.x - mt.x, m.y - mt.y) < 24) { impact = true; break; } }
+        if (impact) { this._blast(mt.x, Math.min(mt.y, this.groundY - 4), 52, mt.color); this.meteors.splice(i, 1); }
+      }
+
       // napalm fire fields: incinerate enemies/UFOs inside for a few seconds + lick flames
       for (let i = this.fires.length - 1; i >= 0; i--) {
         const f = this.fires[i]; f.t += s; f.tick -= dt;
         if (f.tick <= 0) {
           f.tick = 110;   // ~9 burn pulses / sec
           const rr = f.r * (0.85 + 0.15 * Math.sin(f.t * 8));
-          for (let j = this.enemies.length - 1; j >= 0; j--) { const m = this.enemies[j]; if (Math.hypot(m.x - f.x, m.y - f.y) < rr) { this.enemies.splice(j, 1); this.score += 25 * this.wave; this._burst(m.x, m.y, "#ff8a3a", 7); } }
-          for (let j = this.ufos.length - 1; j >= 0; j--) { const u = this.ufos[j]; if (Math.hypot(u.x - f.x, u.y - f.y) < rr + u.radius) { this.ufos.splice(j, 1); const pts = 150 + this.wave * 25; this.score += pts; this._burst(u.x, u.y, "#ff8a3a", 20); this._toast("UFO! +" + pts, true); } }
+          for (let j = this.enemies.length - 1; j >= 0; j--) { const m = this.enemies[j]; if (Math.hypot(m.x - f.x, m.y - f.y) < rr) { this.enemies.splice(j, 1); this.score += 25 * this.wave; this._addKill(); this._burst(m.x, m.y, "#ff8a3a", 7); } }
+          for (let j = this.ufos.length - 1; j >= 0; j--) { const u = this.ufos[j]; if (Math.hypot(u.x - f.x, u.y - f.y) < rr + u.radius) { this.ufos.splice(j, 1); const pts = 150 + this.wave * 25; this.score += pts; this._addKill(); this._burst(u.x, u.y, "#ff8a3a", 20); this._toast("UFO! +" + pts, true); } }
         }
         if (this.theme.effects.particles && Math.random() < 0.9) { const a = Math.random() * Math.PI * 2, rd = Math.sqrt(Math.random()) * f.r;
           this.particles.emit({ x: f.x + Math.cos(a) * rd, y: f.y + Math.sin(a) * rd * 0.55, count: 1, colors: ["#ffe14a", "#ff8a2a", "#ff4a1a"],
@@ -629,8 +702,8 @@
           if (trig) {
             if (it.homing && tgt && Math.hypot(tgt.x - it.x, tgt.y - it.y) < 95) {   // a seeker reliably kills its mark
               const ei = this.enemies.indexOf(tgt);
-              if (ei >= 0) { this.enemies.splice(ei, 1); this.score += 25 * this.wave; this._burst(tgt.x, tgt.y, it.color, 7); }
-              else { const ui = this.ufos.indexOf(tgt); if (ui >= 0) { this.ufos.splice(ui, 1); const pts = 150 + this.wave * 25; this.score += pts; this._toast("UFO! +" + pts, true); this._burst(tgt.x, tgt.y, "#46f0c0", 20); } }
+              if (ei >= 0) { this.enemies.splice(ei, 1); this.score += 25 * this.wave; this._addKill(); this._burst(tgt.x, tgt.y, it.color, 7); }
+              else { const ui = this.ufos.indexOf(tgt); if (ui >= 0) { this.ufos.splice(ui, 1); const pts = 150 + this.wave * 25; this.score += pts; this._addKill(); this._toast("UFO! +" + pts, true); this._burst(tgt.x, tgt.y, "#46f0c0", 20); } }
             }
             this._detonate(it); this.interceptors.splice(i, 1);
           }
@@ -661,8 +734,8 @@
           if (trig || it.fuse <= 0 || it.y > this.groundY) {
             if (tgt && Math.hypot(tgt.x - it.x, tgt.y - it.y) < 95) {  // a homing missile reliably kills its mark (matches the flyby trigger radius)
               const ei = this.enemies.indexOf(tgt);
-              if (ei >= 0) { this.enemies.splice(ei, 1); this.score += 25 * this.wave; this._burst(tgt.x, tgt.y, it.color, 13); if (this.theme.effects.shake) this._shake(3); }
-              else { const ui = this.ufos.indexOf(tgt); if (ui >= 0) { this.ufos.splice(ui, 1); const pts = 150 + this.wave * 25; this.score += pts; this._toast("UFO! +" + pts, true); this._burst(tgt.x, tgt.y, "#46f0c0", 20); if (this.theme.effects.shake) this._shake(6); } }
+              if (ei >= 0) { this.enemies.splice(ei, 1); this.score += 25 * this.wave; this._addKill(); this._burst(tgt.x, tgt.y, it.color, 13); if (this.theme.effects.shake) this._shake(3); }
+              else { const ui = this.ufos.indexOf(tgt); if (ui >= 0) { this.ufos.splice(ui, 1); const pts = 150 + this.wave * 25; this.score += pts; this._addKill(); this._toast("UFO! +" + pts, true); this._burst(tgt.x, tgt.y, "#46f0c0", 20); if (this.theme.effects.shake) this._shake(6); } }
             }
             this._detonate(it); this.interceptors.splice(i, 1);
           }
@@ -692,9 +765,9 @@
       // explosions: destroy enemies / UFOs / collect powerups (chain)
       for (let i = this.explosions.length - 1; i >= 0; i--) {
         const ex = this.explosions[i];
-        if (ex.phase === "grow") { ex.r += BLAST_GROW * s; if (ex.r >= ex.maxR) { ex.r = ex.maxR; ex.phase = "shrink"; } } else { ex.r -= BLAST_SHRINK * s; }
-        for (let j = this.enemies.length - 1; j >= 0; j--) { const m = this.enemies[j]; if (Math.hypot(m.x - ex.x, m.y - ex.y) < ex.r) { this.enemies.splice(j, 1); this.score += 25 * this.wave; this._burst(m.x, m.y, this.theme.palette.enemy, 8); this._blast(m.x, m.y, CHAIN_MAX, ex.color); } }
-        for (let j = this.ufos.length - 1; j >= 0; j--) { const u = this.ufos[j]; if (Math.hypot(u.x - ex.x, u.y - ex.y) < ex.r + u.radius) { this.ufos.splice(j, 1); const pts = 150 + this.wave * 25; this.score += pts; this._burst(u.x, u.y, "#46f0c0", 26); this._toast("UFO! +" + pts, true); if (this.theme.effects.shake) this._shake(6); } }
+        if (ex.phase === "grow") { ex.r += (ex.gw || BLAST_GROW) * s; if (ex.r >= ex.maxR) { ex.r = ex.maxR; ex.phase = "shrink"; } } else { ex.r -= BLAST_SHRINK * s; }
+        for (let j = this.enemies.length - 1; j >= 0; j--) { const m = this.enemies[j]; if (Math.hypot(m.x - ex.x, m.y - ex.y) < ex.r) { this.enemies.splice(j, 1); this.score += 25 * this.wave; this._addKill(); this._burst(m.x, m.y, this.theme.palette.enemy, 8); this._blast(m.x, m.y, CHAIN_MAX, ex.color); } }
+        for (let j = this.ufos.length - 1; j >= 0; j--) { const u = this.ufos[j]; if (Math.hypot(u.x - ex.x, u.y - ex.y) < ex.r + u.radius) { this.ufos.splice(j, 1); const pts = 150 + this.wave * 25; this.score += pts; this._addKill(); this._burst(u.x, u.y, "#46f0c0", 26); this._toast("UFO! +" + pts, true); if (this.theme.effects.shake) this._shake(6); } }
         for (let j = this.powerups.length - 1; j >= 0; j--) { const pu = this.powerups[j]; if (Math.hypot(pu.x - ex.x, pu.y - ex.y) < ex.r + pu.radius) { this.powerups.splice(j, 1); this._collectPowerup(pu); } }
         if (ex.r <= 0) this.explosions.splice(i, 1);
       }
@@ -712,7 +785,7 @@
         if (this.peopleCdT <= 0) {   // limited firepower: the crowd can only pick off ~1 enemy every couple seconds (a barrage overwhelms them)
           for (let k = this.enemies.length - 1; k >= 0; k--) {
             const m = this.enemies[k];
-            if (Math.hypot(m.x - tr.x, m.y - tr.y) < 16) { this.enemies.splice(k, 1); this.score += 5; this._burst(m.x, m.y, "#ffe066", 9); this.peopleCdT = rand(1700, 2600); hit = true; break; }
+            if (Math.hypot(m.x - tr.x, m.y - tr.y) < 16) { this.enemies.splice(k, 1); this.score += 5; this._addKill(); this._burst(m.x, m.y, "#ffe066", 9); this.peopleCdT = rand(1700, 2600); hit = true; break; }
           }
         }
         if (hit || tr.life <= 0 || tr.y < -12) this.tracers.splice(i, 1);
@@ -756,6 +829,9 @@
       for (const ex of this.explosions) R.drawExplosion(ctx, th, ex);
       for (const f of this.fires) R.drawFire(ctx, th, f, now);
       for (const gb of this.napGlobs) R.drawEmber(ctx, th, gb);
+      for (const mt of this.meteors) R.drawEmber(ctx, th, mt);
+      for (const ds of this.droneShots) R.drawEmber(ctx, th, ds);
+      for (const d of this.drones) R.drawDrone(ctx, th, d, now);
       for (const z of this.zaps) R.drawZap(ctx, th, z);
       this.particles.render(ctx);
       R.drawCrosshair(ctx, th, this.aim.x, this.aim.y);
@@ -767,6 +843,7 @@
         heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / w.cd) : 0,
         reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / w.reload, keyNum: WEAPONS.indexOf(w) + 1 }; });
       R.drawWeaponBar(ctx, th, chipData);
+      this.streakRects = R.drawStreakPanel(ctx, th, this.streaks.map(id => SMAP[id]), this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1);
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }

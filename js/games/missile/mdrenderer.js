@@ -215,6 +215,34 @@
       ctx.restore();
     }
 
+    drawDrone(ctx, theme, d, now) {
+      ctx.save(); ctx.translate(d.x, d.y); if (d.vx < 0) ctx.scale(-1, 1);
+      if (theme.effects.glow) { ctx.shadowBlur = 12; ctx.shadowColor = "#7afcff"; }
+      ctx.fillStyle = "#9fd8ff"; ctx.strokeStyle = "#7afcff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(14, -4); ctx.lineTo(22, 0); ctx.lineTo(14, 4); ctx.closePath(); ctx.fill(); ctx.stroke();   // fuselage
+      ctx.beginPath(); ctx.moveTo(-1, -3); ctx.lineTo(-11, -15); ctx.lineTo(-5, -3); ctx.moveTo(-1, 3); ctx.lineTo(-11, 15); ctx.lineTo(-5, 3); ctx.stroke();   // wings
+      ctx.shadowBlur = 0; ctx.fillStyle = (Math.floor(now / 120) % 2) ? "#ff5a5a" : "#ffe14d"; ctx.beginPath(); ctx.arc(17, 0, 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    // killstreak stack on the right edge; returns clickable rects. progress 0..1 = meter to next streak.
+    drawStreakPanel(ctx, theme, list, prog) {
+      const p = theme.palette, sz = 46, x = this.w - sz - 12, gap = 8, y0 = 150, rects = [];
+      ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = p.textDim; ctx.font = "700 9px " + theme.fonts.ui; ctx.fillText("STREAKS", x + sz / 2, y0 - 16);
+      ctx.fillStyle = rgba("#000", 0.4); ctx.fillRect(x, y0 - 9, sz, 4);
+      ctx.fillStyle = p.accent; if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = p.accent; } ctx.fillRect(x, y0 - 9, sz * Math.max(0, Math.min(1, prog)), 4); ctx.shadowBlur = 0;
+      for (let i = 0; i < list.length; i++) {
+        const s = list[i], yy = y0 + i * (sz + gap); rects.push({ x: x, y: yy, w: sz, h: sz });
+        ctx.fillStyle = rgba(s.color, 0.18); ctx.fillRect(x, yy, sz, sz);
+        ctx.strokeStyle = s.color; ctx.lineWidth = 2; if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = s.color; } ctx.strokeRect(x, yy, sz, sz); ctx.shadowBlur = 0;
+        ctx.fillStyle = "#fff"; ctx.font = "800 20px " + theme.fonts.ui; ctx.fillText(s.icon, x + sz / 2, yy + sz / 2 - 4);
+        ctx.fillStyle = s.color; ctx.font = "700 8px " + theme.fonts.ui; ctx.fillText(s.name.split(" ")[0], x + sz / 2, yy + sz - 8);
+      }
+      ctx.restore();
+      return rects;
+    }
+
     drawEmber(ctx, theme, gb) {
       ctx.save();
       if (theme.effects.glow) { ctx.globalCompositeOperation = "lighter"; ctx.shadowBlur = 14; ctx.shadowColor = "#ff8a2a"; }
