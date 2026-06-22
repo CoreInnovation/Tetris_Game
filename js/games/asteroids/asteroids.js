@@ -434,7 +434,7 @@
     // ---------------- render ----------------
     resize(w, h, inset) {
       this._cssW = w; this._cssH = Math.max(120, h - (inset || 0));
-      this.zoom = Math.min(this._cssW, this._cssH) < 620 ? 1.9 : 1;   // zoom in on phones so the action isn't tiny
+      this.zoom = Math.min(this._cssW, this._cssH) < 620 ? 0.55 : 1;   // zoom OUT on phones: ~2x bigger play area, smaller ship
       this._w = this._cssW / this.zoom; this._h = this._cssH / this.zoom;
       this.renderer.resize(this._cssW, this._cssH);
     }
