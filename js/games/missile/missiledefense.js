@@ -135,7 +135,7 @@
       this.unlocked = { interceptor: true };
       this.collected = ["interceptor"];   // up to 4 held weapons (non-dev inventory)
       if (this.dev) WEAPONS.forEach(w => { this.unlocked[w.id] = true; });
-      this.reload = {}; this.cdT = {}; this.heat = {}; this.idleT = {};
+      this.reload = {}; this.cdT = {}; this.heat = {}; this.idleT = {}; this.reloadMax = {}; this.cdMax = {};
       WEAPONS.forEach(w => { this.reload[w.id] = 0; this.cdT[w.id] = 0; this.heat[w.id] = 0; this.idleT[w.id] = 9999; });
       this.multishot = 1; this.multishotT = 0;
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0;
@@ -289,6 +289,8 @@
       this.explosions.length = 0; this.pendingBlasts.length = 0; this.blackholes.length = 0; this.tracers.length = 0;   // clean slate so last wave's ordnance can't hit the new one
       this._applyTempo();
       if (this.wave > 1) this._toast("WAVE " + this.wave, true);
+      const rf = Math.round((1 - this._cooldownScale()) * 100);   // weapons cool/reload this much faster now
+      if (this.wave > 1 && this.wave % 3 === 0 && rf > 0) this._toast("RAPID FIRE  ·  weapons " + rf + "% faster", false, "#ffe14d");
     }
 
     _aliveTargets() {
@@ -390,6 +392,9 @@
         gravity: 120, drag: 1.2, sizeMin: 1.5, sizeMax: 3.4, lifeMin: 0.2, lifeMax: 0.55, glow: this.theme.effects.glow, shape: "circle" });
     }
 
+    // reload + overheat get FASTER as waves climb (the harder it gets, the more you can blast). Floored so it stays balanced.
+    _cooldownScale() { return Math.max(0.5, 1 - (this.wave - 1) * 0.03); }   // wave1 100% -> wave17 ~52% -> floor 50%
+
     _fire(tx, ty) {
       if (ty >= this.groundY - 4) ty = this.groundY - 4;
       const w = WMAP[this.weapon];
@@ -398,10 +403,10 @@
       let best = null, bd = Infinity;
       for (const b of this.batteries) if (b.alive) { const d = Math.abs(b.x - tx); if (d < bd) { bd = d; best = b; } }
       if (!best) { this.audio.play("pill"); return; }
-      const m = this.multishot || 1, pen = 1 + (m - 1) * 0.5;   // ×2 -> 1.5x, ×3 -> 2x heat & reload "for the extra"
-      this.reload[this.weapon] = w.reload * pen; this.idleT[this.weapon] = 0;
+      const m = this.multishot || 1, pen = 1 + (m - 1) * 0.5, sc = this._cooldownScale();   // ×2 -> 1.5x, ×3 -> 2x heat & reload "for the extra"
+      this.reload[this.weapon] = w.reload * pen * sc; this.reloadMax[this.weapon] = this.reload[this.weapon]; this.idleT[this.weapon] = 0;
       this.heat[this.weapon] += (1 / w.mag) * pen;
-      if (this.heat[this.weapon] >= 1) { this.heat[this.weapon] = 1; this.cdT[this.weapon] = w.cd; }   // OVERHEAT -> forced cooldown
+      if (this.heat[this.weapon] >= 1) { this.heat[this.weapon] = 1; this.cdT[this.weapon] = w.cd * sc; this.cdMax[this.weapon] = this.cdT[this.weapon]; }   // OVERHEAT -> forced cooldown (also faster late-game)
       const bx = best.x, by = this.groundY - 14;
       this.audio.play(w.sfx);
       for (let mi = 0; mi < m; mi++) this._launch(w, bx, by, tx + (mi - (m - 1) / 2) * 44, ty);   // salvo fans out with a slight spread
@@ -883,8 +888,8 @@
         mult: this.multishot || 1, multFrac: this.multishotT > 0 ? this.multishotT / MULT_DURATION : 0 });
       const chipData = this.weaponChips.map(ch => { const w = WMAP[ch.id]; const cd = this.cdT[ch.id] || 0; return {
         rect: ch, short: w.short, id: ch.id, color: w.color, locked: !this.unlocked[ch.id], active: this.weapon === ch.id,
-        heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / w.cd) : 0,
-        reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / w.reload, keyNum: WEAPONS.indexOf(w) + 1 }; });
+        heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / (this.cdMax[ch.id] || w.cd)) : 0,
+        reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / (this.reloadMax[ch.id] || w.reload), keyNum: WEAPONS.indexOf(w) + 1 }; });
       R.drawWeaponBar(ctx, th, chipData);
       this.streakRects = R.drawStreakPanel(ctx, th, this.streaks.map(id => SMAP[id]), this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1, this._rmbDown ? this._streakSel : -1);
       if (this.betweenWaves) {   // breather countdown between waves
