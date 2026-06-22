@@ -75,6 +75,26 @@
       ctx.restore();
     }
 
+    drawReactor(ctx, theme, rc, now) {
+      const p = theme.palette, hot = rc.lit > 0, accent = p.accent;
+      ctx.save();
+      const n = 16, rr = rc.r + 10;
+      for (let i = 0; i < n; i++) {   // ring of orbiting lights
+        const a = (i / n) * 6.2832 + now / 1500;
+        const lx = rc.x + Math.cos(a) * rr, ly = rc.y + Math.sin(a) * rr;
+        const on = ((i + Math.floor(now / 110)) % 3 === 0);
+        ctx.fillStyle = on ? "#ffd24a" : rgba(accent, 0.45);
+        ctx.beginPath(); ctx.arc(lx, ly, on ? 3 : 1.8, 0, 6.2832); ctx.fill();
+      }
+      this._glow(ctx, theme, accent, theme.effects.glow ? 22 : 0);
+      const g = ctx.createRadialGradient(rc.x, rc.y, 2, rc.x, rc.y, rc.r * (hot ? 1.15 : 1));
+      g.addColorStop(0, "#ffffff"); g.addColorStop(0.4, accent); g.addColorStop(1, rgba(accent, 0.15));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(rc.x, rc.y, rc.r * (hot ? 1.12 : 1), 0, 6.2832); ctx.fill();
+      ctx.shadowBlur = 0; ctx.strokeStyle = rgba("#ffffff", 0.7); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rc.x, rc.y, rc.r * 0.5, 0, 6.2832); ctx.stroke();
+      ctx.restore();
+    }
+
     drawFlipper(ctx, theme, f) {
       const p = theme.palette;
       const tx = f.px + Math.cos(f.angle) * f.len, ty = f.py + Math.sin(f.angle) * f.len;
@@ -119,7 +139,18 @@
       ctx.fillText(String(data.score).toLocaleString(), 18, 14);
       ctx.shadowBlur = 0; ctx.font = "600 13px " + theme.fonts.ui; ctx.fillStyle = p.textDim; ctx.textAlign = "right";
       ctx.fillText("BALL  " + "●".repeat(Math.max(0, data.balls)), this.w - 18, 18);
-      if (data.multiball) { ctx.fillStyle = p.accent; ctx.font = "800 13px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.fillText("MULTIBALL!", this.w / 2, 16); }
+      // rank + playfield multiplier under the score
+      ctx.shadowBlur = 0; ctx.textAlign = "left"; ctx.font = "700 12px " + theme.fonts.ui; ctx.fillStyle = p.textDim;
+      ctx.fillText("RANK  " + (data.rank || "CADET") + (data.mult > 1 ? "    ×" + data.mult : ""), 18, 44);
+      // active mission banner + countdown (or multiball flash)
+      if (data.mission) {
+        const m = data.mission, cx = this.w / 2;
+        ctx.textAlign = "center"; ctx.fillStyle = p.accent; ctx.font = "800 13px " + theme.fonts.ui;
+        ctx.fillText(m.name + "  " + m.prog + "/" + m.goal, cx, 14);
+        const frac = Math.max(0, Math.min(1, m.t / (m.tMax || 30)));
+        ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(cx - 70, 33, 140, 4);
+        ctx.fillStyle = frac < 0.25 ? (p.danger || "#ff5a6e") : p.accent; ctx.fillRect(cx - 70, 33, 140 * frac, 4);
+      } else if (data.multiball) { ctx.fillStyle = p.accent; ctx.font = "800 13px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.fillText("MULTIBALL!", this.w / 2, 16); }
       ctx.restore();
     }
 
