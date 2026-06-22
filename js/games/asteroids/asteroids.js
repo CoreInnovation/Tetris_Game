@@ -77,7 +77,7 @@
       this.firing = false; this.fireId = null;
       this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
-      this._w = 800; this._h = 600;
+      this._w = 800; this._h = 600; this._cssW = 800; this._cssH = 600; this.zoom = 1;
       this._bindInput();
     }
 
@@ -145,13 +145,13 @@
     // it's dragged past STICK_MAX, so you can re-aim from anywhere and reverse direction instantly.
     _bindTouch() {
       const canvas = this.shell.canvas, STICK_MAX = 70;
-      const toLocal = (t) => { const r = canvas.getBoundingClientRect(); return { x: (t.clientX - r.left) * (this._w / r.width), y: (t.clientY - r.top) * (this._h / r.height) }; };
+      const toLocal = (t) => { const r = canvas.getBoundingClientRect(); return { x: (t.clientX - r.left) * (this._cssW / r.width), y: (t.clientY - r.top) * (this._cssH / r.height) }; };
       const onStart = (e) => {
         if (this.paused || this.state !== "playing") return;
         e.preventDefault();
         for (const t of e.changedTouches) {
           const p = toLocal(t);
-          if (p.x > this._w * 0.6) { if (this.fireId == null) { this.firing = true; this.fireId = t.identifier; } }
+          if (p.x > this._cssW * 0.6) { if (this.fireId == null) { this.firing = true; this.fireId = t.identifier; } }
           else if (!this.stick.active) { this.stick.active = true; this.stick.id = t.identifier; this.stick.baseX = p.x; this.stick.baseY = p.y; this.stick.kx = p.x; this.stick.ky = p.y; this.stick.dx = 0; this.stick.dy = 0; this.stick.mag = 0; }
         }
       };
@@ -213,7 +213,10 @@
     _addBullet(x, y, a, w, flags) {
       if (this.bullets.length >= MAX_BULLETS) return;
       const s = this.ship;
-      this.bullets.push(Object.assign({ x: x, y: y, vx: s.vx + Math.cos(a) * w.speed, vy: s.vy + Math.sin(a) * w.speed, life: w.life, color: w.color, wid: w.id }, flags || {}));
+      // cap range at ~75% of the playfield extent in the firing direction (so shots don't wrap around forever)
+      const range = 0.75 * (Math.abs(Math.cos(a)) * this._w + Math.abs(Math.sin(a)) * this._h);
+      const life = (flags && flags.homing) ? w.life : Math.min(w.life, range / (w.speed || 1));
+      this.bullets.push(Object.assign({ x: x, y: y, vx: s.vx + Math.cos(a) * w.speed, vy: s.vy + Math.sin(a) * w.speed, life: life, color: w.color, wid: w.id }, flags || {}));
     }
 
     _fire() {
@@ -429,14 +432,19 @@
     }
 
     // ---------------- render ----------------
-    resize(w, h, inset) { this._w = w; this._h = Math.max(120, h - (inset || 0)); this.renderer.resize(w, h); }
+    resize(w, h, inset) {
+      this._cssW = w; this._cssH = Math.max(120, h - (inset || 0));
+      this.zoom = Math.min(this._cssW, this._cssH) < 620 ? 1.9 : 1;   // zoom in on phones so the action isn't tiny
+      this._w = this._cssW / this.zoom; this._h = this._cssH / this.zoom;
+      this.renderer.resize(this._cssW, this._cssH);
+    }
 
     render(now) {
       const ctx = this.ctx2d, R = this.renderer, th = this.theme;
       R.drawBackground(ctx, th, now);
       let sx = 0, sy = 0;
       if (this.shakeMag > 0.1) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
-      ctx.save(); ctx.translate(sx, sy);
+      ctx.save(); ctx.translate(sx, sy); ctx.scale(this.zoom, this.zoom);   // camera zoom (world space)
       for (const bh of this.blackholes) R.drawBlackhole(ctx, th, bh);
       for (const a of this.asteroids) R.drawAsteroid(ctx, a, th);
       for (const b of this.bullets) R.drawBullet(ctx, b, th);
@@ -449,7 +457,7 @@
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, lives: this.lives, wave: this.wave });
       R.drawWeaponTag(ctx, th, WMAP[this.weapon], this.dev ? "∞" : (WMAP[this.weapon].base ? "∞" : (this.ammo[this.weapon] || 0)), this.dev);
-      if (this.shell.isTouch) R.drawTouchControls(ctx, th, this.stick, this.firing, this._w, this._h);
+      if (this.shell.isTouch) R.drawTouchControls(ctx, th, this.stick, this.firing, this._cssW, this._cssH);
       this._renderToasts(ctx, R, th, now);
       R.drawScanlines(ctx, th);
     }
@@ -461,7 +469,7 @@
         const t = this.toasts[i], pr = (now - t.born) / t.life, alpha = pr < 0.15 ? pr / 0.15 : (1 - (pr - 0.15) / 0.85);
         ctx.globalAlpha = Math.max(0, alpha); ctx.font = "800 " + (t.big ? 30 : 18) + "px " + th.fonts.ui;
         if (th.effects.glow) { ctx.shadowBlur = 14; ctx.shadowColor = th.palette.accent; }
-        ctx.fillStyle = th.palette.accent; ctx.fillText(t.text, this._w / 2, this._h * 0.3 - pr * 20 + i * 30);
+        ctx.fillStyle = th.palette.accent; ctx.fillText(t.text, this._cssW / 2, this._cssH * 0.3 - pr * 20 + i * 30);
       }
       ctx.restore();
     }

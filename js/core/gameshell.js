@@ -70,15 +70,18 @@
       this._touchDefaults = {};
       this.refs.touchControls.querySelectorAll(".tc-btn").forEach(b => { this._touchDefaults[b.getAttribute("data-act")] = b.textContent; });
 
-      // First user gesture unlocks audio (autoplay policy).
-      const unlock = () => { this.audio.unlock(); };
-      window.addEventListener("pointerdown", unlock, { once: true });
-      window.addEventListener("keydown", unlock, { once: true });
+      // Unlock audio on the first real gesture. Some mobile browsers only honor touchend (not
+      // pointerdown), so we listen on several events in the CAPTURE phase (so a game's
+      // preventDefault/stopPropagation can't swallow it) and keep retrying until the context is
+      // actually running, then detach.
+      const GEST = ["pointerdown", "touchstart", "touchend", "mousedown", "keydown", "click"];
+      const tryUnlock = () => { this.audio.unlock(); if (this.audio.running) GEST.forEach(ev => window.removeEventListener(ev, tryUnlock, true)); };
+      GEST.forEach(ev => window.addEventListener(ev, tryUnlock, true));
 
       window.addEventListener("resize", () => this._resize());
       // Auto-pause if the window loses focus, so held keys can't get "stuck".
       window.addEventListener("blur", () => this.togglePause(true));
-      document.addEventListener("visibilitychange", () => { if (document.hidden) this.togglePause(true); });
+      document.addEventListener("visibilitychange", () => { if (document.hidden) this.togglePause(true); else this.audio.unlock(); });
 
       this._updateSoundIcon();
       this.showMenu();
@@ -160,7 +163,8 @@
       // Touch buttons: shown for games that use them; pointer-driven games opt out.
       if (this.isTouch && !this._game.pointerInput) {
         this._applyTouchLabels(this._game);
-        this.refs.touchControls.classList.toggle("gamepad", this._game.touchLayout === "gamepad");
+        this.refs.touchControls.classList.remove("gamepad", "flippers");
+        if (this._game.touchLayout) this.refs.touchControls.classList.add(this._game.touchLayout);
         this._show(this.refs.touchControls);
       } else this._hide(this.refs.touchControls);
 

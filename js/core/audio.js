@@ -56,10 +56,37 @@
       this._master.connect(this._ctx.destination);
     }
 
+    get running() { return !!(this._ctx && this._ctx.state === "running"); }
+
     /** Call from a user gesture to satisfy autoplay policies. */
     unlock() {
       this._wake();
+      if (this._ctx) {
+        // canonical iOS WebAudio kick: play a 1-sample buffer during the gesture
+        try { const b = this._ctx.createBuffer(1, 1, 22050); const s = this._ctx.createBufferSource(); s.buffer = b; s.connect(this._ctx.destination); s.start(0); } catch (e) {}
+      }
+      this._unlockSession();
       this.resumeMusic();
+    }
+
+    /** iOS mutes WebAudio when the ringer switch is silent. Playing a near-silent looping
+        <audio> element flips the page into the media-playback session so WebAudio is heard
+        through the volume buttons regardless of the ring switch. Safe no-op if unsupported. */
+    _unlockSession() {
+      if (this._sessionEl) { const pr = this._sessionEl.play(); if (pr && pr.catch) pr.catch(() => {}); return; }
+      try {
+        const sr = 8000, n = Math.floor(sr * 0.2), buf = new ArrayBuffer(44 + n), dv = new DataView(buf);
+        const wr = (o, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(o + i, str.charCodeAt(i)); };
+        wr(0, "RIFF"); dv.setUint32(4, 36 + n, true); wr(8, "WAVE"); wr(12, "fmt "); dv.setUint32(16, 16, true);
+        dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr, true);
+        dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); wr(36, "data"); dv.setUint32(40, n, true);
+        for (let i = 0; i < n; i++) dv.setUint8(44 + i, 128); // 8-bit silence
+        const el = document.createElement("audio");
+        el.src = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+        el.loop = true; el.playsInline = true; el.setAttribute("playsinline", ""); el.volume = 0.001;
+        const pr = el.play(); if (pr && pr.catch) pr.catch(() => {});
+        this._sessionEl = el;
+      } catch (e) {}
     }
 
     setMuted(v) {
