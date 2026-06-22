@@ -140,6 +140,7 @@
     mountGame(mod) {
       this._module = mod;
       this._hide(this.refs.menu);
+      this._hide(this.refs.chooserOverlay);   // never let an open chooser bleed onto a freshly-launched game
       this._show(this.refs.gameView);
       this._show(this.refs.backBtn);
       this._show(this.refs.pauseBtn);
@@ -278,7 +279,7 @@
       } else this._hide(tc);
     }
 
-    _openChooser(kind) { this.audio.unlock(); this._chooserKind = kind; this._renderChooser(); this._show(this.refs.chooserOverlay); }
+    _openChooser(kind) { this.audio.unlock(); const m = this._gameMenus(); if (!m || !m[kind]) return; this._chooserKind = kind; this._renderChooser(); this._show(this.refs.chooserOverlay); }
     _closeChooser() { this._hide(this.refs.chooserOverlay); }
     _renderChooser() {
       const menus = this._gameMenus(); if (!menus) return this._closeChooser();
@@ -291,7 +292,7 @@
       else if (kind === "skin" && menus.skin) menus.skin.options.forEach(o => btn(o.name, o.id === menus.skin.current, () => { menus.skin.set(o.id); this._closeChooser(); }));
       else if (kind === "control" && menus.control) {
         const c = menus.control;
-        if (c.profiles) { label("Layout"); c.profiles.forEach(o => btn(o.name, o.id === c.profile, () => { c.setProfile(o.id); this._refreshTouchLayout(); if (this._game.resize) this._game.resize(this._cssW, this._cssH, this._touchInset()); this._renderChooser(); })); }
+        if (c.profiles) { label("Layout"); c.profiles.forEach(o => btn(o.name, o.id === c.profile, () => { c.setProfile(o.id); this._refreshTouchLayout(); const g = this._game; requestAnimationFrame(() => { if (g && g.resize) g.resize(this._cssW, this._cssH, this._touchInset()); }); this._renderChooser(); })); }
         if (c.toggles) { label("Options"); c.toggles.forEach(t => btn(t.name + (t.on ? "   ✓" : "   ✕"), t.on, () => { t.set(!t.on); this._renderChooser(); })); }
       } else this._closeChooser();
     }
@@ -383,8 +384,8 @@
         b.style.display = "";   // clear any inline display left by a previous game so CSS/grid rules apply cleanly
         const act = b.getAttribute("data-act");
         const lbl = (labels && Object.prototype.hasOwnProperty.call(labels, act)) ? labels[act] : this._touchDefaults[act];
-        if (lbl === "") { b.style.display = "none"; }
-        else { b.textContent = lbl; }
+        b.textContent = lbl;    // always set (clears stale text on hidden buttons too)
+        if (lbl === "") b.style.display = "none";
       });
     }
 

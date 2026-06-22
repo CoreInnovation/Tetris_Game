@@ -159,7 +159,7 @@
           profile: this._ctrl,
           setProfile: (id) => { self._ctrl = id; self.shell.storage.set("drmario:ctrl", id); }
         },
-        music: { options: SG.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("drmario:song", i); self._applyMusic(); } },
+        music: { options: SG.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("drmario:song", i); self._applyMusic(); self._toast("♪ " + SG[i].name); } },
         skin: { options: D.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = D.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("drmario:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
       };
     }
