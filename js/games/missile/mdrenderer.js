@@ -215,6 +215,17 @@
       ctx.restore();
     }
 
+    drawEmber(ctx, theme, gb) {
+      ctx.save();
+      if (theme.effects.glow) { ctx.globalCompositeOperation = "lighter"; ctx.shadowBlur = 14; ctx.shadowColor = "#ff8a2a"; }
+      const r = 6, g = ctx.createRadialGradient(gb.x, gb.y, 0, gb.x, gb.y, r);
+      g.addColorStop(0, rgba("#fff1b0", 0.95));
+      g.addColorStop(0.45, rgba("#ff8a2a", 0.75));
+      g.addColorStop(1, rgba("#ff3a10", 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gb.x, gb.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
     drawCrosshair(ctx, theme, x, y) {
       const p = theme.palette;
       ctx.save();

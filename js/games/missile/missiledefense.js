@@ -115,7 +115,7 @@
       this.batteries = BAT_SLOTS.map(s => ({ slot: s, alive: true, x: 0 }));
       this.cities = CITY_SLOTS.map(s => ({ slot: s, alive: true, x: 0, panic: false }));
       this.enemies = []; this.interceptors = []; this.explosions = []; this.powerups = [];
-      this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = []; this.fires = [];
+      this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = []; this.fires = []; this.napGlobs = [];
       this.weapon = "interceptor";
       this.unlocked = { interceptor: true };
       this.collected = ["interceptor"];   // up to 4 held weapons (non-dev inventory)
@@ -418,7 +418,7 @@
 
     _detonate(it) {
       if (it.blackhole) { this._spawnBlackhole(it.x, it.y, it.color); return; }
-      if (it.fire) { this._blast(it.x, it.y, it.blast, it.color); this._spawnFire(it.x, it.y, it.fireR || 80, it.fireDur || 3.2, it.color); return; }
+      if (it.fire) { this._napalmBurst(it.x, it.y, it.fireDur || 3.2, it.color); return; }
       this._blast(it.x, it.y, it.blast, it.color);
       if (it.chain) this._chainZap(it.x, it.y, it.color, it.chain);
       if (it.cluster) {
@@ -458,12 +458,25 @@
       if (this.theme.effects.shake) this._shake(4);
     }
 
-    // NAPALM leaves a roaring fire field: a circular zone that incinerates any enemy/UFO inside for fireDur seconds.
-    _spawnFire(x, y, r, dur, color) {
+    // A fire field: a circular zone that incinerates any enemy/UFO inside for `dur` seconds.
+    _spawnFire(x, y, r, dur, color, silent) {
       y = Math.min(y, this.groundY - 6);
       this.fires.push({ x: x, y: y, r: r, dur: dur, t: 0, tick: 0, color: color || "#ff6a2a" });
-      this.audio.play("boom");
-      if (this.theme.effects.shake) this._shake(4);
+      if (!silent) { this.audio.play("boom"); if (this.theme.effects.shake) this._shake(4); }
+    }
+
+    // NAPALM airburst: scatter a handful of flaming GLOBS that arc out and rain down,
+    // each starting its own little fire where it lands (separated patches, like real napalm).
+    _napalmBurst(x, y, dur, color) {
+      color = color || "#ff6a2a";
+      this._blast(x, y, 38, color);   // airburst flash (handles the boom + shake)
+      const n = 8;
+      for (let k = 0; k < n; k++) {
+        const a = -Math.PI / 2 + rand(-1.25, 1.25), sp = rand(95, 250);   // spray mostly up & out
+        this.napGlobs.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(20, 90), fuse: rand(0.5, 1.3), dur: dur, color: color });
+      }
+      if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: 16, colors: ["#ffe14a", "#ff8a2a", "#ff4a1a"],
+        speedMin: 60, speedMax: 320, gravity: 200, drag: 1, sizeMin: 2, sizeMax: 4.5, lifeMin: 0.3, lifeMax: 0.8, glow: this.theme.effects.glow, shape: "circle" });
     }
 
     _destroyStructure(x) {
@@ -546,6 +559,14 @@
         for (const m of this.enemies) { const dx = bh.x - m.x, dy = bh.y - m.y, d = Math.hypot(dx, dy) || 1; if (d < bh.range) { const fp = BH_PULL * (1 - d / bh.range); m.x += dx / d * fp * s; m.y += dy / d * fp * s; } }
         for (const u of this.ufos) { const dx = bh.x - u.x, dy = bh.y - u.y, d = Math.hypot(dx, dy) || 1; if (d < bh.range) { const fp = BH_PULL * 0.7 * (1 - d / bh.range); u.x += dx / d * fp * s; u.y += dy / d * fp * s; } }
         if (bh.t >= bh.dur) { this._blast(bh.x, bh.y, 130, bh.color); if (this.theme.effects.shake) this._shake(9); this.blackholes.splice(i, 1); }
+      }
+
+      // napalm globs: flaming bits that arc out, trail fire, and splash a small fire where they land
+      for (let i = this.napGlobs.length - 1; i >= 0; i--) {
+        const gb = this.napGlobs[i]; gb.vy += 540 * s; gb.x += gb.vx * s; gb.y += gb.vy * s; gb.fuse -= s;
+        if (this.theme.effects.particles && Math.random() < 0.7) this.particles.emit({ x: gb.x, y: gb.y, count: 1, colors: ["#ffd24a", "#ff7a2a", "#ff3a1a"],
+          speedMin: 5, speedMax: 28, gravity: 70, drag: 1.4, sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.2, lifeMax: 0.5, glow: this.theme.effects.glow, shape: "circle" });
+        if (gb.fuse <= 0 || gb.y >= this.groundY - 4) { this._spawnFire(gb.x, Math.min(gb.y, this.groundY - 4), rand(30, 46), gb.dur * rand(0.55, 0.8), gb.color, true); this.napGlobs.splice(i, 1); }
       }
 
       // napalm fire fields: incinerate enemies/UFOs inside for a few seconds + lick flames
@@ -734,6 +755,7 @@
       for (const it of this.interceptors) R.drawInterceptor(ctx, th, it);
       for (const ex of this.explosions) R.drawExplosion(ctx, th, ex);
       for (const f of this.fires) R.drawFire(ctx, th, f, now);
+      for (const gb of this.napGlobs) R.drawEmber(ctx, th, gb);
       for (const z of this.zaps) R.drawZap(ctx, th, z);
       this.particles.render(ctx);
       R.drawCrosshair(ctx, th, this.aim.x, this.aim.y);
