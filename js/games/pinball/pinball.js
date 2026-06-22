@@ -48,6 +48,17 @@
   const SONGS = [{ id: "drift", name: "Space Drift", song: SONG_DRIFT }, { id: "techno", name: "Techno Remix", song: SONG_TECHNO }];
   P.SONGS = SONGS;
 
+  // ---- mission / rank progression (original "space cadet" spirit) ----
+  // Drop the target bank to launch a mission; complete the objective before time runs out to rank up,
+  // bump the playfield multiplier, and trigger multiball.
+  const MISSIONS = [
+    { name: "CORE BREACH", type: "reactor", goal: 5, time: 26 },
+    { name: "ION STORM", type: "bumper", goal: 24, time: 30 },
+    { name: "WORMHOLE RUN", type: "reactor", goal: 7, time: 30 },
+    { name: "SUPERNOVA", type: "bumper", goal: 34, time: 34 }
+  ];
+  const RANKS = ["CADET", "ENSIGN", "LIEUTENANT", "CAPTAIN", "COMMANDER", "ADMIRAL", "FLEET ADMIRAL"];
+
   function rand(a, b) { return a + Math.random() * (b - a); }
   function seg(x1, y1, x2, y2, thick) { return { x1: x1, y1: y1, x2: x2, y2: y2, thick: thick || 2 }; }
 
@@ -103,11 +114,13 @@
       // a bank of drop targets (classic scoring feature)
       this.targets = [];
       for (let i = 0; i < 6; i++) this.targets.push({ x: 66 + i * 26, y1: 118, y2: 142, down: false, hit: 0 });
+      this.reactor = { x: 191, y: 408, r: 25, lit: 0 };   // glowing central core — the mission objective + a big bumper
       this.plungerX = 381;
     }
 
     _reset() {
       this.score = 0; this.lives = 3; this.bumperHits = 0;
+      this.rank = 0; this.mult = 1; this.mission = null; this.missionIdx = 0; this.reactor.lit = 0;
       this.balls = []; this.charging = false; this.plunge = 0;
       this.flippers.forEach(f => { f.pressed = false; f.angle = f.rest; });
       this.msg = ""; this.msgT = 0; this.shakeMag = 0;
@@ -198,6 +211,8 @@
       for (const b of this.bumpers) if (b.hit > 0) b.hit -= dt / 1000;
       for (const s of this.slings) if (s.hit > 0) s.hit -= dt / 1000;
       for (const t of this.targets) if (t.hit > 0) t.hit -= dt / 1000;
+      if (this.reactor.lit > 0) this.reactor.lit -= dt / 1000;
+      if (this.mission) { this.mission.t -= dt / 1000; if (this.mission.t <= 0) { this.mission = null; this._flash("MISSION FAILED"); } }
       if (this.state !== "playing") return;
 
       // flippers
@@ -253,9 +268,12 @@
         for (const t of this.targets) {
           if (t.down) continue;
           if (this._collideSeg(b, t.x, t.y1, t.x, t.y2, 4, 0.4)) {
-            t.down = true; t.hit = 0.2; this.score += 250; this.audio.play("bump");
+            t.down = true; t.hit = 0.2; this.score += 250 * this.mult; this.audio.play("bump");
             this._burst(t.x, (t.y1 + t.y2) / 2, this.theme.palette.accent, 8);
-            if (this.targets.every(q => q.down)) { this.score += 2000; this._flash("TARGET BANK +2000"); this.targets.forEach(q => q.down = false); }
+            if (this.targets.every(q => q.down)) {
+              this.score += 2000 * this.mult; this.targets.forEach(q => q.down = false);
+              if (!this.mission) this._startMission(); else this._flash("TARGET BANK +" + (2000 * this.mult));
+            }
           }
         }
 
@@ -264,7 +282,7 @@
           if (hit) {
             const out = b.vx * hit.nx + b.vy * hit.ny;
             if (out < SLING_KICK) { b.vx += hit.nx * (SLING_KICK - out); b.vy += hit.ny * (SLING_KICK - out); }
-            s.hit = 0.12; this.score += 25; this.audio.play("flip"); this._burst(b.x, b.y, this.theme.palette.sling, 5);
+            s.hit = 0.12; this.score += 25 * this.mult; this.audio.play("flip"); this._burst(b.x, b.y, this.theme.palette.sling, 5);
           }
         }
 
@@ -277,10 +295,23 @@
             if (vn < 0) { b.vx -= 1.5 * vn * nx; b.vy -= 1.5 * vn * ny; }
             const out = b.vx * nx + b.vy * ny;
             if (out < BUMP_KICK) { b.vx += nx * (BUMP_KICK - out); b.vy += ny * (BUMP_KICK - out); }
-            bm.hit = 0.12; this.score += 100; this.bumperHits++;
+            bm.hit = 0.12; this.score += 100 * this.mult; this.bumperHits++;
             this.audio.play("bump"); this._burst(bm.x, bm.y, this.theme.palette.bumperHit, 9);
             if (this.theme.effects.shake) this._shake(2);
-            if (this.bumperHits % 18 === 0) this._multiball();
+            this._missionProgress("bumper");
+            if (this.bumperHits % 24 === 0) this._multiball();
+          }
+        }
+
+        // central reactor — a big bumper + the main mission objective
+        { const rc = this.reactor; let nx = b.x - rc.x, ny = b.y - rc.y, d = Math.hypot(nx, ny);
+          if (d < b.r + rc.r) {
+            if (d < 0.0001) { nx = 0; ny = -1; d = 1; }
+            nx /= d; ny /= d; b.x = rc.x + nx * (b.r + rc.r); b.y = rc.y + ny * (b.r + rc.r);
+            const vn = b.vx * nx + b.vy * ny; if (vn < 0) { b.vx -= 1.6 * vn * nx; b.vy -= 1.6 * vn * ny; }
+            const out = b.vx * nx + b.vy * ny; if (out < BUMP_KICK) { b.vx += nx * (BUMP_KICK - out); b.vy += ny * (BUMP_KICK - out); }
+            rc.lit = 0.5; this.score += 500 * this.mult; this.audio.play("bump"); this._burst(rc.x, rc.y, this.theme.palette.accent, 12);
+            if (this.theme.effects.shake) this._shake(3); this._missionProgress("reactor");
           }
         }
 
@@ -299,6 +330,26 @@
       let added = 0;
       for (let k = 0; k < 2 && this.balls.length < MAX_BALLS; k++) { this._spawnBall(rand(120, 280), rand(150, 260), rand(-120, 120), rand(-60, 60)); added++; }
       if (added) { this._flash("MULTIBALL!"); this.audio.play("win"); if (this.theme.effects.shake) this._shake(5); }
+    }
+
+    _startMission() {
+      const m = MISSIONS[this.missionIdx % MISSIONS.length]; this.missionIdx++;
+      this.mission = { name: m.name, type: m.type, goal: m.goal, prog: 0, t: m.time, tMax: m.time };
+      this._flash("MISSION: " + m.name); this.audio.play("extralife");
+    }
+    _missionProgress(type) {
+      if (!this.mission || this.mission.type !== type) return;
+      this.mission.prog++;
+      if (this.mission.prog >= this.mission.goal) this._completeMission();
+    }
+    _completeMission() {
+      this.score += 5000 * this.mult;
+      if (this.rank < RANKS.length - 1) this.rank++;
+      this.mult = Math.min(6, this.mult + 1);
+      this.mission = null;
+      this._flash("MISSION COMPLETE!  " + RANKS[this.rank]);
+      this.audio.play("win"); if (this.theme.effects.shake) this._shake(7);
+      this._multiball();
     }
 
     // ---------------- render ----------------
@@ -322,12 +373,13 @@
       for (const t of this.targets) R.drawTarget(ctx, th, t);
       for (const s of this.slings) R.drawSling(ctx, th, s, now);
       for (const bm of this.bumpers) R.drawBumper(ctx, th, bm);
+      R.drawReactor(ctx, th, this.reactor, now);
       for (const f of this.flippers) R.drawFlipper(ctx, th, f);
       R.drawPlunger(ctx, th, this.plungerX, 642, this.charging ? this.plunge : 0);
       this.particles.render(ctx);
       for (const b of this.balls) R.drawBall(ctx, th, b, b.trail);
       ctx.restore();
-      R.drawHUD(ctx, th, { score: this.score, balls: this.lives, multiball: this.balls.length > 1 });
+      R.drawHUD(ctx, th, { score: this.score, balls: this.lives, multiball: this.balls.length > 1, rank: RANKS[this.rank], mult: this.mult, mission: this.mission });
       if (this.msgT > 0) R.drawMessage(ctx, th, this.msg, now);
       R.drawScanlines(ctx, th);
     }
