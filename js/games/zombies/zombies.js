@@ -374,21 +374,26 @@
 
     _updatePlayer(s) {
       const pl = this.player, K = this._keys;
-      let ix = 0, iy = 0;
-      if (this.stick.active && this.stick.mag > 0.12) { ix = this.stick.dx * this.stick.mag; iy = this.stick.dy * this.stick.mag; }
+      let ix = 0, iy = 0, analog = 1;
+      if (this.stick.active && this.stick.mag > 0.12) { ix = this.stick.dx; iy = this.stick.dy; analog = this.stick.mag; }   // stick: unit dir + analog throttle
       else { if (K.KeyA || K.ArrowLeft) ix -= 1; if (K.KeyD || K.ArrowRight) ix += 1; if (K.KeyW || K.ArrowUp) iy -= 1; if (K.KeyS || K.ArrowDown) iy += 1; }
-      const mag = Math.min(1, Math.hypot(ix, iy));
-      let dir = { x: 0, y: 0 };
-      if (mag > 0.01) { dir = this._screenToWorld(ix, iy); this._lastMoveDir = dir; pl.moving = true; pl.flip = (dir.x - dir.y) >= 0 ? 1 : -1; pl.walk += s * 12; }
-      else pl.moving = false;
+      const im = Math.hypot(ix, iy);
+      let moveDir = { x: 0, y: 0 };
+      if (im > 0.01) {
+        const sx = ix / im, sy = iy / im;   // unit SCREEN direction
+        // world vector whose iso projection IS that unit screen dir -> identical on-screen speed in every direction (no diagonal slowdown)
+        moveDir = { x: sx / (2 * KX) + sy / (2 * KY), y: -sx / (2 * KX) + sy / (2 * KY) };
+        const wm = Math.hypot(moveDir.x, moveDir.y) || 1;
+        this._lastMoveDir = { x: moveDir.x / wm, y: moveDir.y / wm };
+        pl.moving = true; pl.flip = (moveDir.x - moveDir.y) >= 0 ? 1 : -1; pl.walk += s * 12;
+      } else pl.moving = false;
       // sprint
       const wantSprint = (K.ShiftLeft || K.ShiftRight || (this.stick.active && this.stick.mag > 0.92));
       let sprint = 1;
       if (wantSprint && pl.moving && (pl.stam > 0 || this.boosts.overcharge > 0)) { sprint = 1.5; if (this.boosts.overcharge <= 0) { pl.stam -= 30 * s; pl.regenPause = 0.6; } }
-      let spd = BASE_SPEED * this._speedMult() * sprint * MOVE;
-      // dash overrides
-      if (pl.dashT > 0) { pl.dashT -= s; spd = BASE_SPEED * 3.4 * MOVE; dir = { x: pl.dashVX, y: pl.dashVY }; pl.moving = true; }
-      if (mag > 0.01 || pl.dashT > 0) { pl.wx += dir.x * spd * s; pl.wy += dir.y * spd * s; }
+      const spd = BASE_SPEED * this._speedMult() * sprint * MOVE;
+      if (pl.dashT > 0) { pl.dashT -= s; const dspd = BASE_SPEED * 3.4 * MOVE; pl.wx += pl.dashVX * dspd * s; pl.wy += pl.dashVY * dspd * s; pl.moving = true; }
+      else if (im > 0.01) { pl.wx += moveDir.x * spd * analog * s; pl.wy += moveDir.y * spd * analog * s; }
       // clamp to arena
       const dd = Math.hypot(pl.wx, pl.wy); if (dd > ARENA) { pl.wx *= ARENA / dd; pl.wy *= ARENA / dd; }
       // stamina regen
