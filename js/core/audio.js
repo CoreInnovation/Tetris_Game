@@ -206,6 +206,8 @@
         case "extralife": this._arp([523, 659, 784, 1047], 0.07, "square"); break;
         case "siren":    this._siren(); break;
         case "crowd":    this._crowd(); break;
+        case "zap":      this._tone(2300, 0.05, "square", 0.10, 900); this._tone(1500, 0.08, "sawtooth", 0.08, 480); this._noise(0.09, 0.07); break;
+        case "whoosh":   this._tone(700, 0.5, "sine", 0.14, 90); this._tone(430, 0.55, "triangle", 0.09, 60); this._noise(0.5, 0.05); break;
         default: break;
       }
     }
