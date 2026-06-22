@@ -16,6 +16,7 @@
       <h1 id="title">A&nbsp;R&nbsp;C&nbsp;A&nbsp;D&nbsp;E</h1>
       <div id="topbar-right">
         <button id="pauseBtn" class="icon-btn hidden" title="Pause (P)" aria-label="Pause">⏸</button>
+        <button id="controlBtn" class="icon-btn hidden" title="Control layout" aria-label="Control layout">🎮</button>
         <button id="devBtn" class="icon-btn hidden" title="Dev mode — unlock & test any weapon" aria-label="Dev mode">🛠️</button>
         <button id="musicBtn" class="icon-btn hidden" title="Switch music (N)" aria-label="Switch music">🎵</button>
         <button id="themeBtn" class="icon-btn hidden" title="Switch skin (T)" aria-label="Switch skin">🎨</button>
@@ -55,6 +56,15 @@
           <button class="btn" data-action="restart">Restart</button>
           <button class="btn" data-action="theme">Switch Skin</button>
           <button class="btn ghost" data-action="quit">Quit to Menu</button>
+        </div>
+      </div>
+
+      <!-- Options chooser (controls / music / skin) -->
+      <div id="chooserOverlay" class="overlay hidden">
+        <div class="panel">
+          <h2 id="chooserTitle">Options</h2>
+          <div id="chooserBody" class="chooser-body"></div>
+          <button class="btn ghost" data-action="closeChooser">Close</button>
         </div>
       </div>
 

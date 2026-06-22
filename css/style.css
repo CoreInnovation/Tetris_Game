@@ -193,6 +193,10 @@ html, body {
 .panel h2 { font-size: 26px; margin-bottom: 10px; letter-spacing: 1px; }
 .panel h2.danger { color: var(--danger); }
 
+.chooser-body { display: flex; flex-direction: column; gap: 8px; max-height: 58vh; overflow-y: auto; -webkit-overflow-scrolling: touch; margin-bottom: 4px; }
+.chooser-label { color: var(--muted); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; margin: 10px 0 2px; text-align: left; }
+.chooser-body .btn { font-size: 14px; }
+
 .btn {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border);
