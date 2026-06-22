@@ -166,6 +166,26 @@
       ctx.restore();
     }
 
+    drawTouchControls(ctx, theme, stick, firing, w, h) {
+      const p = theme.palette;
+      ctx.save();
+      // fire button, bottom-right
+      const fx = w - 66, fy = h - 72, fr = 44;
+      ctx.globalAlpha = firing ? 0.55 : 0.26; ctx.fillStyle = p.danger || "#ff5a5a";
+      ctx.beginPath(); ctx.arc(fx, fy, fr, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 0.9; ctx.fillStyle = "#fff"; ctx.font = "800 15px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("FIRE", fx, fy);
+      // floating thumbstick base + knob when active
+      if (stick && stick.active) {
+        ctx.lineWidth = 2; ctx.strokeStyle = p.accent; ctx.fillStyle = p.accent;
+        ctx.globalAlpha = 0.16; ctx.beginPath(); ctx.arc(stick.baseX, stick.baseY, 70, 0, 6.2832); ctx.fill();
+        ctx.globalAlpha = 0.30; ctx.beginPath(); ctx.arc(stick.baseX, stick.baseY, 70, 0, 6.2832); ctx.stroke();
+        const kx = stick.kx != null ? stick.kx : stick.baseX, ky = stick.ky != null ? stick.ky : stick.baseY;
+        ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.arc(kx, ky, 30, 0, 6.2832); ctx.fill();
+      }
+      ctx.restore();
+    }
+
     drawScanlines(ctx, theme) {
       if (!theme.effects.scanlines) return;
       if (!this._scan) { const o = document.createElement("canvas"); o.width = 1; o.height = 3; const c = o.getContext("2d"); c.fillStyle = "#000"; c.fillRect(0, 0, 1, 1); this._scan = ctx.createPattern(o, "repeat"); }

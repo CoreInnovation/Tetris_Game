@@ -96,7 +96,8 @@
       this.paused = false;
       this.state = "playing";
       this._now = 0;
-      this.touchLabels = { left: "◀", right: "▶", soft: "▼", hard: "DROP", cw: "⟳", ccw: "⟲", hold: "" };   // no hold piece in Dr. Quackers
+      this.touchLayout = "gamepad";   // same NES-style control layout as Tetris
+      this.touchLabels = { left: "◀", right: "▶", soft: "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" };   // no hold piece in Dr. Quackers
       this._bindInput();
     }
 
