@@ -27,7 +27,7 @@
     { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 30, cluster: 8, sfx: "launch", color: "#ff7a3a" },
     { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 95, slow: 3.5, sfx: "cryo", color: "#8fd9ff" },
     { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 510, blast: 32, pellets: 5, sfx: "launch", color: "#9aff6a" },
-    { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 5, weight: 1.15, sfx: "rail", color: "#b388ff" },
+    { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 5, weight: 2.6, sfx: "rail", color: "#b388ff" },
     { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 120, blackhole: true, weight: 1.6, sfx: "cryo", color: "#c86bff" },
     // homing interceptors — quarter-size blast, but they track the target themselves (hand-tuned)
     // homing interceptors that COLD-LAUNCH like the warhead (eject -> ignite -> home); quarter-size blast
@@ -431,12 +431,12 @@
         used[best] = 1; const m = this.enemies[best]; pts.push({ x: m.x, y: m.y }); cx = m.x; cy = m.y; hit.push(best);
       }
       hit.sort((a, b) => b - a).forEach(k => { const m = this.enemies[k]; this.score += 25 * this.wave; this._burst(m.x, m.y, color, 6); this.enemies.splice(k, 1); });
-      if (pts.length > 1) { this.zaps.push({ points: pts, life: 0.22, color: color || "#b388ff" }); if (this.theme.effects.shake) this._shake(3); }
+      if (pts.length > 1) { this.zaps.push({ points: pts, life: 0.22, color: color || "#b388ff" }); this.audio.play("zap"); if (this.theme.effects.shake) this._shake(3); }
     }
 
     _spawnBlackhole(x, y, color) {
       this.blackholes.push({ x: x, y: y, t: 0, dur: 1.15, range: 200, color: color || "#c86bff" });
-      this.audio.play("cryo");
+      this.audio.play("whoosh");   // black-hole forms with a swirling woosh
       if (this.theme.effects.shake) this._shake(4);
     }
 
