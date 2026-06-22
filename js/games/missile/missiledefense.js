@@ -26,7 +26,7 @@
     { id: "railgun", name: "RAIL GUN", short: "RAIL", kind: "direct", speed: 2600, blast: 22, minWave: 3, sfx: "rail", color: "#7afcff" },
     { id: "missile", name: "WARHEAD", short: "WAR", kind: "cold", speed: 320, blast: 170, minWave: 3, sfx: "eject", color: null },
     { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 95, slow: 3.5, minWave: 4, sfx: "cryo", color: "#8fd9ff" },
-    { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 64, minWave: 4, sfx: "launch", color: "#ffe14d" },
+    { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 92, minWave: 4, sfx: "launch", color: "#ffe14d" },
     // homing interceptors that COLD-LAUNCH like the warhead (eject -> ignite -> home); quarter-size blast
     { id: "seeker", name: "SEEKER", short: "SEEK", kind: "cold", homing: true, speed: 320, blast: 15, pellets: 1, reload: 460, mag: 5, cd: 1100, manual: true, minWave: 5, sfx: "eject", color: "#9affd0" },
     // NAPALM — arcs in, splashes a lingering FIRE FIELD that incinerates anything passing through for a few seconds
@@ -409,7 +409,8 @@
       if (this.heat[this.weapon] >= 1) { this.heat[this.weapon] = 1; this.cdT[this.weapon] = w.cd * sc; this.cdMax[this.weapon] = this.cdT[this.weapon]; }   // OVERHEAT -> forced cooldown (also faster late-game)
       const bx = best.x, by = this.groundY - 14;
       this.audio.play(w.sfx);
-      for (let mi = 0; mi < m; mi++) this._launch(w, bx, by, tx + (mi - (m - 1) / 2) * 44, ty);   // salvo fans out with a slight spread
+      const salvoSpread = 95 + (m - 2) * 18;   // double/triple fire fans out WIDE so it blankets a bigger area
+      for (let mi = 0; mi < m; mi++) this._launch(w, bx, by, tx + (mi - (m - 1) / 2) * salvoSpread, ty);
     }
 
     // spawn ONE shot of weapon w aimed at (tx,ty) — called once per missile in a multi-fire salvo
@@ -433,7 +434,7 @@
       } else if (w.kind === "swarm") {
         const n = w.pellets || 4;
         for (let i = 0; i < n; i++) {
-          const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.38;   // tighter fan so the swarm converges on targets faster
+          const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.5;   // wider launch fan so the swarm covers more sky
           this.interceptors.push(this._proj(w, bx, by, tx, ty, { mode: "home",
             vx: Math.cos(a) * HORNET_SPEED, vy: Math.sin(a) * HORNET_SPEED, heading: a, fuse: 4.2 }));
         }
@@ -442,7 +443,7 @@
         const pellets = w.pellets || 1;
         for (let i = 0; i < pellets; i++) {
           let ax = tx, ay = ty;
-          if (pellets > 1) { ax = tx + (i - (pellets - 1) / 2) * (w.spread || 50) * 0.6 + rand(-8, 8); ay = ty + rand(-(w.spread || 50) * 0.25, (w.spread || 50) * 0.25); }
+          if (pellets > 1) { ax = tx + (i - (pellets - 1) / 2) * (w.spread || 50) * 0.85 + rand(-10, 10); ay = ty + rand(-(w.spread || 50) * 0.32, (w.spread || 50) * 0.32); }
           const dx = ax - bx, dy = ay - by, d = Math.hypot(dx, dy) || 1;
           this.interceptors.push(this._proj(w, bx, by, ax, ay, { vx: dx / d * w.speed, vy: dy / d * w.speed }));
         }
