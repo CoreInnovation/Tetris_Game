@@ -226,21 +226,36 @@
     }
 
     // killstreak stack on the right edge; returns clickable rects. progress 0..1 = meter to next streak.
-    drawStreakPanel(ctx, theme, list, prog) {
+    // sel >= 0 = the chip being aimed at while holding right-click (release to fire it).
+    drawStreakPanel(ctx, theme, list, prog, sel) {
       const p = theme.palette, sz = 46, x = this.w - sz - 12, gap = 8, y0 = 150, rects = [];
       ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillStyle = p.textDim; ctx.font = "700 9px " + theme.fonts.ui; ctx.fillText("STREAKS", x + sz / 2, y0 - 16);
       ctx.fillStyle = rgba("#000", 0.4); ctx.fillRect(x, y0 - 9, sz, 4);
       ctx.fillStyle = p.accent; if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = p.accent; } ctx.fillRect(x, y0 - 9, sz * Math.max(0, Math.min(1, prog)), 4); ctx.shadowBlur = 0;
       for (let i = 0; i < list.length; i++) {
-        const s = list[i], yy = y0 + i * (sz + gap); rects.push({ x: x, y: yy, w: sz, h: sz });
-        ctx.fillStyle = rgba(s.color, 0.18); ctx.fillRect(x, yy, sz, sz);
-        ctx.strokeStyle = s.color; ctx.lineWidth = 2; if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = s.color; } ctx.strokeRect(x, yy, sz, sz); ctx.shadowBlur = 0;
+        const s = list[i], yy = y0 + i * (sz + gap), picked = (i === sel); rects.push({ x: x, y: yy, w: sz, h: sz });
+        ctx.fillStyle = rgba(s.color, picked ? 0.40 : 0.18); ctx.fillRect(x, yy, sz, sz);
+        ctx.strokeStyle = picked ? "#ffffff" : s.color; ctx.lineWidth = picked ? 3.5 : 2; if (theme.effects.glow) { ctx.shadowBlur = picked ? 18 : 10; ctx.shadowColor = s.color; } ctx.strokeRect(x, yy, sz, sz); ctx.shadowBlur = 0;
         ctx.fillStyle = "#fff"; ctx.font = "800 20px " + theme.fonts.ui; ctx.fillText(s.icon, x + sz / 2, yy + sz / 2 - 4);
-        ctx.fillStyle = s.color; ctx.font = "700 8px " + theme.fonts.ui; ctx.fillText(s.name.split(" ")[0], x + sz / 2, yy + sz - 8);
+        ctx.fillStyle = picked ? "#fff" : s.color; ctx.font = "700 8px " + theme.fonts.ui; ctx.fillText(s.name.split(" ")[0], x + sz / 2, yy + sz - 8);
+        if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 9px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.fillText("▶", x - 4, yy + sz / 2); ctx.textAlign = "center"; }
       }
+      if (sel >= 0 && list.length) { ctx.fillStyle = p.text; ctx.font = "700 9px " + theme.fonts.ui; ctx.fillText("RELEASE", x + sz / 2, y0 + list.length * (sz + gap) + 4); }
       ctx.restore();
       return rects;
+    }
+
+    drawVolcano(ctx, theme, v, now) {
+      const gy = this.groundY;
+      ctx.save();
+      ctx.fillStyle = "#3a2018"; ctx.beginPath(); ctx.moveTo(v.x - 48, gy); ctx.lineTo(v.x - 16, gy - 46); ctx.lineTo(v.x + 16, gy - 46); ctx.lineTo(v.x + 48, gy); ctx.closePath(); ctx.fill();   // mound
+      ctx.strokeStyle = "#241008"; ctx.lineWidth = 2; ctx.stroke();
+      if (theme.effects.glow) { ctx.globalCompositeOperation = "lighter"; ctx.shadowBlur = 26; ctx.shadowColor = "#ff5a2a"; }
+      const r = 26 + Math.sin(now / 70) * 4, g = ctx.createRadialGradient(v.x, gy - 46, 0, v.x, gy - 46, r);   // glowing crater
+      g.addColorStop(0, rgba("#fff1b0", 0.95)); g.addColorStop(0.5, rgba("#ff7a2a", 0.8)); g.addColorStop(1, rgba("#ff3a10", 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(v.x, gy - 46, r, r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     }
 
     drawEmber(ctx, theme, gb) {

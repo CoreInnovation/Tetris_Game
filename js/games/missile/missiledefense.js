@@ -59,15 +59,16 @@
   })();
   const WMAP = {}; WEAPONS.forEach(w => WMAP[w.id] = w);
   M.WEAPONS = WEAPONS;
-  // rail gun was a touch underpowered: more shots before overheat + a shorter overheat lockout
-  WMAP.railgun.mag = 14; WMAP.railgun.cd = 700;
+  // rail gun: lots of shots before overheat + a short lockout (Chris loves spamming it)
+  WMAP.railgun.mag = 24; WMAP.railgun.cd = 650;
 
   // ---- KILLSTREAKS: collectible super-weapons earned by kills; they STACK on the right side ----
   const STREAK_EVERY = 18, STREAK_MAX = 5;
   const STREAKS = [
-    { id: "nuke",   name: "NUKE",          icon: "☢", color: "#ffe14d" },   // ☢ — huge half-screen blast
-    { id: "drone",  name: "DRONE STRIKE",  icon: "✈", color: "#7afcff" },   // ✈ — flies in, rains mini-missiles
-    { id: "meteor", name: "METEOR SHOWER", icon: "☄", color: "#ff7a3a" }    // ☄ — fireballs rain across the map
+    { id: "nuke",    name: "NUKE",          icon: "☢", color: "#ffe14d" },   // ☢ — huge half-screen blast
+    { id: "drone",   name: "DRONE STRIKE",  icon: "✈", color: "#7afcff" },   // ✈ — flies in, rains mini-missiles
+    { id: "meteor",  name: "METEOR SHOWER", icon: "☄", color: "#ff7a3a" },   // ☄ — fireballs rain across the map
+    { id: "volcano", name: "VOLCANO",       icon: "🌋", color: "#ff5a2a" }    // 🌋 — ground erupts, hurls lava bombs
   ];
   const SMAP = {}; STREAKS.forEach(s => SMAP[s.id] = s);
   M.STREAKS = STREAKS;
@@ -129,6 +130,7 @@
       this.enemies = []; this.interceptors = []; this.explosions = []; this.powerups = [];
       this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = []; this.fires = []; this.napGlobs = [];
       this.streaks = []; this.streakKills = 0; this.streakRects = []; this.drones = []; this.droneShots = []; this.meteors = []; this.meteorN = 0; this.meteorT = 0;
+      this._rmbDown = false; this._streakSel = 0; this.volcano = null;
       this.weapon = "interceptor";
       this.unlocked = { interceptor: true };
       this.collected = ["interceptor"];   // up to 4 held weapons (non-dev inventory)
@@ -156,6 +158,9 @@
       const c = this.shell.canvas;
       if (this._pm) c.removeEventListener("pointermove", this._pm);
       if (this._pd) c.removeEventListener("pointerdown", this._pd);
+      if (this._pu) c.removeEventListener("pointerup", this._pu);
+      if (this._pw) c.removeEventListener("wheel", this._pw);
+      if (this._cm) c.removeEventListener("contextmenu", this._cm);
       this._unsub.forEach(fn => fn()); this._unsub.length = 0;
     }
 
@@ -205,13 +210,31 @@
       this._pm = (e) => { if (this.paused || this.state !== "playing") return; const p = toLocal(e); this.aim.x = p.x; this.aim.y = p.y; };
       this._pd = (e) => {
         if (this.paused || this.state !== "playing") return; e.preventDefault();
+        if (e.button === 2) {   // RIGHT button: hold to pick a killstreak (scroll to change), release to FIRE it
+          this._rmbDown = true; this._streakSel = Math.max(0, Math.min(this._streakSel || 0, this.streaks.length - 1));
+          return;
+        }
+        if (e.button !== 0 && e.button !== undefined) return;   // ignore middle/extra buttons
         const p = toLocal(e);
         for (const ch of this.weaponChips) { if (p.x >= ch.x && p.x <= ch.x + ch.w && p.y >= ch.y && p.y <= ch.y + ch.h) { this._selectWeapon(ch.id); return; } }
         for (let k = 0; k < this.streakRects.length; k++) { const r = this.streakRects[k]; if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) { this._useStreak(k); return; } }   // tap a streak chip to unleash it
         this.aim.x = p.x; this.aim.y = p.y; this._fire(p.x, p.y);
       };
+      this._pu = (e) => {
+        if (e.button === 2 && this._rmbDown) { e.preventDefault(); this._rmbDown = false; if (this.state === "playing" && !this.paused) this._useStreak(this._streakSel || 0); }   // release right click -> pop the selected streak
+      };
+      this._pw = (e) => {   // scroll wheel
+        if (this.paused || this.state !== "playing") return; e.preventDefault();
+        const dir = e.deltaY > 0 ? 1 : -1;
+        if (this._rmbDown && this.streaks.length > 0) { this._streakSel = (this._streakSel + dir + this.streaks.length) % this.streaks.length; this.audio.play("select"); }   // pick a streak
+        else this._selectWeapon(dir > 0 ? this._nextUnlocked() : this._prevUnlocked());   // cycle weapons
+      };
+      this._cm = (e) => { e.preventDefault(); };   // suppress the browser right-click menu over the canvas
       canvas.addEventListener("pointermove", this._pm);
       canvas.addEventListener("pointerdown", this._pd);
+      canvas.addEventListener("pointerup", this._pu);
+      canvas.addEventListener("wheel", this._pw, { passive: false });
+      canvas.addEventListener("contextmenu", this._cm);
     }
 
     _selectWeapon(id) { if (id && this.unlocked[id]) { this.weapon = id; this.audio.play("select"); } else this.audio.play("pill"); }
@@ -512,6 +535,7 @@
       if (id === "nuke") this._nukeStrike();
       else if (id === "drone") this._droneStrike();
       else if (id === "meteor") this._meteorShower();
+      else if (id === "volcano") this._volcano();
     }
     _nukeStrike() {
       const cx = this._w / 2, cy = this._h * 0.42;
@@ -526,6 +550,12 @@
     }
     _meteorShower() {
       this.meteorN = 16; this.meteorT = 0; this.audio.play("whoosh"); this._toast("☄ METEOR SHOWER!", true);
+    }
+    _volcano() {
+      this.volcano = { x: this._w * 0.5, t: 0, dur: 2.4, spewT: 0 };
+      this._blast(this._w * 0.5, this.groundY - 10, 92, "#ff5a2a"); this.flash = 0.7; if (this.theme.effects.shake) this._shake(18);
+      this._spawnFire(this._w * 0.5, this.groundY - 8, 72, 3.2, "#ff5a2a", true);   // lava pool at the base
+      this.audio.play("boom"); this._toast("🌋 VOLCANO ERUPTION!", true);
     }
 
     _destroyStructure(x) {
@@ -640,6 +670,18 @@
         let impact = mt.y >= this.groundY - 4;
         if (!impact) for (const m of this.enemies) { if (Math.hypot(m.x - mt.x, m.y - mt.y) < 24) { impact = true; break; } }
         if (impact) { this._blast(mt.x, Math.min(mt.y, this.groundY - 4), 52, mt.color); this.meteors.splice(i, 1); }
+      }
+      // killstreak: VOLCANO — the ground erupts (sustained shake) and hurls lava bombs that rain back down
+      if (this.volcano) {
+        const v = this.volcano; v.t += s; v.spewT -= dt;
+        if (this.theme.effects.shake) this._shake(7);   // ground keeps shaking through the eruption
+        if (v.spewT <= 0 && v.t < v.dur) {
+          v.spewT = rand(45, 95);
+          for (let k = 0, n = 1 + (Math.random() < 0.6 ? 1 : 0); k < n; k++) { const a = -Math.PI / 2 + rand(-0.7, 0.7), sp = rand(440, 760); this.meteors.push({ x: v.x + rand(-22, 22), y: this.groundY - 16, vx: Math.cos(a) * sp * 0.6, vy: Math.sin(a) * sp, color: "#ff5a2a" }); }   // lava bombs launch UP, gravity rains them down
+          if (this.theme.effects.particles) this.particles.emit({ x: v.x, y: this.groundY - 14, count: 4, colors: ["#ffd24a", "#ff7a2a", "#ff3a1a"], speedMin: 120, speedMax: 440, angleMin: -Math.PI * 0.8, angleMax: -Math.PI * 0.2, gravity: 520, drag: 0.6, sizeMin: 2, sizeMax: 5, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle" });
+          this.audio.play("eject");
+        }
+        if (v.t >= v.dur) this.volcano = null;
       }
 
       // napalm fire fields: incinerate enemies/UFOs inside for a few seconds + lick flames
@@ -832,6 +874,7 @@
       for (const mt of this.meteors) R.drawEmber(ctx, th, mt);
       for (const ds of this.droneShots) R.drawEmber(ctx, th, ds);
       for (const d of this.drones) R.drawDrone(ctx, th, d, now);
+      if (this.volcano) R.drawVolcano(ctx, th, this.volcano, now);
       for (const z of this.zaps) R.drawZap(ctx, th, z);
       this.particles.render(ctx);
       R.drawCrosshair(ctx, th, this.aim.x, this.aim.y);
@@ -843,7 +886,7 @@
         heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / w.cd) : 0,
         reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / w.reload, keyNum: WEAPONS.indexOf(w) + 1 }; });
       R.drawWeaponBar(ctx, th, chipData);
-      this.streakRects = R.drawStreakPanel(ctx, th, this.streaks.map(id => SMAP[id]), this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1);
+      this.streakRects = R.drawStreakPanel(ctx, th, this.streaks.map(id => SMAP[id]), this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1, this._rmbDown ? this._streakSel : -1);
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }
