@@ -117,7 +117,7 @@
           setProfile: (id) => { self.ctrlProfile = id; self.shell.storage.set("asteroids:ctrl", id); self._clearTouchState(); },
           toggles: [{ id: "tap", name: "Tap to fire (one thumb)", on: this.tapFire, set: (v) => { self.tapFire = v; self.shell.storage.set("asteroids:tapfire", v); } }]
         },
-        music: { options: SG.map(s => ({ id: s.id, name: s.name })), current: SG[this.songIdx].id, set: (id) => { const i = SG.findIndex(s => s.id === id); if (i >= 0) { self.songIdx = i; self.shell.storage.set("asteroids:song", i); self._applyMusic(); self._toast("♪ " + SG[i].name); } } },
+        music: { options: SG.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("asteroids:song", i); self._applyMusic(); self._toast("♪ " + SG[i].name); } },
         skin: { options: A.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = A.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("asteroids:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
       };
     }
