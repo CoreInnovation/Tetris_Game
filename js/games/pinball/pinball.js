@@ -58,6 +58,7 @@
       this.theme = P.getTheme(ctx.storage.get("pinball:theme", "modern"));
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("pinball:song", 0) | 0));
       this.songIdxDefault = this.songIdx;
+      this.touchLayout = "flippers";   // spread the flipper buttons to the far left/right (thumbs), LAUNCH in the middle
       this.touchLabels = { left: "◀ FLIP", right: "FLIP ▶", hard: "LAUNCH", cw: "", ccw: "", soft: "", hold: "" };
       this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
@@ -89,7 +90,11 @@
       this.bumpers = [
         { x: 128, y: 198, r: 18, hit: 0 },
         { x: 252, y: 182, r: 18, hit: 0 },
-        { x: 192, y: 272, r: 18, hit: 0 }
+        { x: 192, y: 272, r: 18, hit: 0 },
+        { x: 84, y: 252, r: 15, hit: 0 },    // extra pop bumpers for more chaos
+        { x: 300, y: 238, r: 15, hit: 0 },
+        { x: 60, y: 170, r: 11, hit: 0 },    // small upper "post" kickers
+        { x: 322, y: 158, r: 11, hit: 0 }
       ];
       this.flippers = [
         { px: 140, py: 604, len: 70, thick: 7, rest: 0.40, active: -0.52, angle: 0.40, prev: 0.40, angVel: 0, pressed: false },
@@ -97,7 +102,7 @@
       ];
       // a bank of drop targets (classic scoring feature)
       this.targets = [];
-      for (let i = 0; i < 4; i++) this.targets.push({ x: 78 + i * 26, y1: 118, y2: 142, down: false, hit: 0 });
+      for (let i = 0; i < 6; i++) this.targets.push({ x: 66 + i * 26, y1: 118, y2: 142, down: false, hit: 0 });
       this.plungerX = 381;
     }
 
