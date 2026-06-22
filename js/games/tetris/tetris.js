@@ -110,7 +110,7 @@
       this._unsub = [];
       this.paused = false;
       this.state = "playing"; // playing | clearing | over
-      this._ctrl = ctx.storage.get("tetris:ctrl", "gamepad");   // gamepad (2-thumb) | thumb-r | thumb-l
+      this._ctrl = ctx.storage.get("tetris:ctrl", ctx.isTouch ? "gestures" : "gamepad");   // gestures | gamepad | thumb-r | thumb-l
 
       this._bindInput();
     }
@@ -203,14 +203,15 @@
       return this.theme.name;
     }
 
-    // touch layout follows the chosen control profile (gamepad d-pad, or a one-thumb corner cluster)
-    get touchLayout() { return this._ctrl === "thumb-l" ? "onethumb onethumb-left" : this._ctrl === "thumb-r" ? "onethumb onethumb-right" : "gamepad"; }
-    get touchLabels() { const one = this._ctrl !== "gamepad"; return { left: "◀", right: "▶", soft: one ? "" : "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" }; }
+    // touch layout follows the chosen control profile (gestures = no bar; gamepad d-pad; one-thumb corner cluster)
+    get pointerInput() { return this._ctrl === "gestures"; }   // gestures use canvas swipes, so hide the shared button bar
+    get touchLayout() { return this._ctrl === "thumb-l" ? "onethumb onethumb-left" : this._ctrl === "thumb-r" ? "onethumb onethumb-right" : this._ctrl === "gestures" ? "" : "gamepad"; }
+    get touchLabels() { const one = this._ctrl === "thumb-l" || this._ctrl === "thumb-r"; return { left: "◀", right: "▶", soft: one ? "" : "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" }; }
     menus() {
       const self = this, SG = T.SONGS;
       return {
         control: {
-          profiles: [{ id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }],
+          profiles: [{ id: "gestures", name: "Gestures (one finger)" }, { id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }],
           profile: this._ctrl,
           setProfile: (id) => { self._ctrl = id; self.shell.storage.set("tetris:ctrl", id); }
         },
@@ -224,6 +225,45 @@
       const input = this.shell.input;
       this._unsub.push(input.onDown((code, e, repeat) => this._onKeyDown(code, repeat)));
       this._unsub.push(input.onUp((code) => this._onKeyUp(code)));
+      if (this.shell.isTouch) this._bindGestures();
+    }
+
+    // synthesize a key tap to the game's own handlers (used by gesture controls)
+    _emitKey(code) { const inp = this.shell.input; inp._down.forEach(fn => fn(code, { code }, false)); inp._up.forEach(fn => fn(code, { code })); }
+
+    // GESTURES profile: tap = rotate, drag left/right = move (one cell per ~26px), swipe down = hard drop
+    _bindGestures() {
+      const canvas = this.shell.canvas, STEP = 26, TAP = 14, DROP_DY = 50;
+      let g = null;
+      const onStart = (e) => {
+        if (this._ctrl !== "gestures" || this.paused || this.state === "over") return;
+        const t = e.changedTouches[0]; if (!t) return; e.preventDefault();
+        g = { id: t.identifier, sx: t.clientX, sy: t.clientY, lastX: t.clientX, moved: false, dropped: false };
+      };
+      const onMove = (e) => {
+        if (!g || this._ctrl !== "gestures") return;
+        let t = null; for (const ct of e.changedTouches) if (ct.identifier === g.id) { t = ct; break; }
+        if (!t) return; e.preventDefault();
+        const totalDx = t.clientX - g.sx, totalDy = t.clientY - g.sy;
+        if (!g.dropped && totalDy > DROP_DY && totalDy > Math.abs(totalDx)) { this._emitKey("Space"); g.dropped = true; g.moved = true; return; }   // swipe down = hard drop
+        while (!g.dropped && Math.abs(t.clientX - g.lastX) >= STEP) {   // drag = step move
+          if (t.clientX < g.lastX) { this._emitKey("ArrowLeft"); g.lastX -= STEP; } else { this._emitKey("ArrowRight"); g.lastX += STEP; }
+          g.moved = true;
+        }
+        if (Math.abs(totalDx) > TAP || Math.abs(totalDy) > TAP) g.moved = true;
+      };
+      const onEnd = (e) => {
+        if (!g) return;
+        let ended = false; for (const ct of e.changedTouches) if (ct.identifier === g.id) ended = true;
+        if (!ended) return;
+        if (this._ctrl === "gestures" && !g.moved && !g.dropped) this._emitKey("ArrowUp");   // tap = rotate
+        g = null;
+      };
+      canvas.addEventListener("touchstart", onStart, { passive: false });
+      canvas.addEventListener("touchmove", onMove, { passive: false });
+      canvas.addEventListener("touchend", onEnd, { passive: false });
+      canvas.addEventListener("touchcancel", onEnd, { passive: false });
+      this._unsub.push(() => { canvas.removeEventListener("touchstart", onStart); canvas.removeEventListener("touchmove", onMove); canvas.removeEventListener("touchend", onEnd); canvas.removeEventListener("touchcancel", onEnd); });
     }
 
     _onKeyDown(code, repeat) {
