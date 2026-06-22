@@ -200,6 +200,21 @@
       ctx.restore();
     }
 
+    drawFire(ctx, theme, f, now) {
+      const a = Math.max(0, 1 - f.t / f.dur);                 // fades as it burns out
+      const flick = 0.82 + 0.18 * Math.sin(now / 60 + f.x);    // flame flicker
+      const r = f.r * (0.9 + 0.1 * Math.sin(now / 90 + f.y)) * (0.5 + 0.5 * Math.min(1, f.t * 4));   // quick grow-in
+      ctx.save();
+      if (theme.effects.glow) { ctx.globalCompositeOperation = "lighter"; ctx.shadowBlur = 26; ctx.shadowColor = "#ff7a2a"; }
+      const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, Math.max(1, r));
+      g.addColorStop(0, rgba("#fff1b0", 0.85 * a * flick));
+      g.addColorStop(0.45, rgba("#ff8a2a", 0.6 * a));
+      g.addColorStop(0.8, rgba("#ff3a10", 0.34 * a));
+      g.addColorStop(1, rgba("#ff3a10", 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(f.x, f.y, r, r * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
     drawCrosshair(ctx, theme, x, y) {
       const p = theme.palette;
       ctx.save();
