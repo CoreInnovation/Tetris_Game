@@ -111,6 +111,37 @@
       src.start(t0);
     }
 
+    // soft two-tone air-raid wail
+    _siren() {
+      if (this._muted) return; this._wake(); if (!this._ctx) return;
+      const t0 = this._ctx.currentTime, osc = this._ctx.createOscillator(), g = this._ctx.createGain(), f = this._ctx.createBiquadFilter();
+      osc.type = "sawtooth"; f.type = "lowpass"; f.frequency.value = 1500;
+      const lo = 560, hi = 940, seg = 0.22, segs = 4;
+      osc.frequency.setValueAtTime(lo, t0);
+      for (let i = 0; i < segs; i++) osc.frequency.linearRampToValueAtTime(i % 2 === 0 ? hi : lo, t0 + seg * (i + 1));
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.09, t0 + 0.06);
+      g.gain.setValueAtTime(0.09, t0 + seg * segs - 0.12);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + seg * segs);
+      osc.connect(f); f.connect(g); g.connect(this._master);
+      osc.start(t0); osc.stop(t0 + seg * segs + 0.05);
+    }
+
+    // short crowd-murmur swell (filtered noise + a couple faint voices)
+    _crowd() {
+      if (this._muted) return; this._wake(); if (!this._ctx) return;
+      const t0 = this._ctx.currentTime, dur = 0.5;
+      const frames = Math.floor(this._ctx.sampleRate * dur), buf = this._ctx.createBuffer(1, frames, this._ctx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < frames; i++) { const env = Math.sin(Math.PI * i / frames); d[i] = (Math.random() * 2 - 1) * env; }
+      const src = this._ctx.createBufferSource(); src.buffer = buf;
+      const f = this._ctx.createBiquadFilter(); f.type = "bandpass"; f.Q.value = 0.7;
+      f.frequency.setValueAtTime(650, t0); f.frequency.linearRampToValueAtTime(1250, t0 + dur);
+      const g = this._ctx.createGain(); g.gain.value = 0.085;
+      src.connect(f); f.connect(g); g.connect(this._master); src.start(t0); src.stop(t0 + dur + 0.02);
+      this._tone(430, 0.13, "sawtooth", 0.045, 520);
+      this._tone(300, 0.15, "sawtooth", 0.04, 360);
+    }
+
     // ---- Named SFX (semantic; games call these) ----
     play(name) {
       switch (name) {
@@ -146,6 +177,8 @@
         case "drain":    this._tone(330, 0.40, "sine", 0.18, 70); break;
         case "ufo":      this._tone(520, 0.26, "square", 0.10, 720); break;
         case "extralife": this._arp([523, 659, 784, 1047], 0.07, "square"); break;
+        case "siren":    this._siren(); break;
+        case "crowd":    this._crowd(); break;
         default: break;
       }
     }

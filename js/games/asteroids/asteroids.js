@@ -72,7 +72,7 @@
       this.renderer = new A.Renderer();
       this.theme = A.getTheme(ctx.storage.get("asteroids:theme", "modern"));
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("asteroids:song", 0) | 0));
-      this.touchLabels = { left: "◀", right: "▶", cw: "THRUST", ccw: "WARP", hard: "FIRE", hold: "", soft: "" };
+      this.touchLabels = { left: "◀", right: "▶", cw: "THRUST", ccw: "WARP", hard: "FIRE", hold: "◀WPN", soft: "WPN▶" };
       this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600;
@@ -129,7 +129,18 @@
         if (this.paused || this.state !== "playing" || repeat) return;
         if (code === "KeyZ" || code === "ShiftLeft" || code === "ShiftRight") this._hyperspace();
         else if (code.indexOf("Digit") === 0) { const n = parseInt(code.slice(5), 10) - 1; if (n >= 0 && n < WEAPONS.length && this._has(WEAPONS[n].id)) { this.weapon = WEAPONS[n].id; this.audio.play("select"); } }
+        else if (code === "KeyC" || code === "KeyQ") this._cycleWeapon(-1);   // touch "◀WPN" / keyboard Q
+        else if (code === "ArrowDown" || code === "KeyE") this._cycleWeapon(1);  // touch "WPN▶" / keyboard E
       }));
+    }
+
+    // cycle through the currently-available weapons (for touch + Q/E)
+    _cycleWeapon(dir) {
+      const avail = WEAPONS.filter(w => this._has(w.id));
+      if (avail.length < 2) return;
+      let i = avail.findIndex(w => w.id === this.weapon);
+      i = (i + dir + avail.length) % avail.length;
+      this.weapon = avail[i].id; this.audio.play("select");
     }
 
     _spawnShip(center) { this.ship = { x: this._w / 2, y: this._h / 2, vx: 0, vy: 0, angle: -Math.PI / 2, thrusting: false, alive: true, radius: SHIP_R, invuln: center ? 1500 : INVULN }; }

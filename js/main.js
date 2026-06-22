@@ -16,6 +16,7 @@
       gameGrid: $("gameGrid"),
       canvas: $("gameCanvas"),
       backBtn: $("backBtn"),
+      pauseBtn: $("pauseBtn"),
       themeBtn: $("themeBtn"),
       musicBtn: $("musicBtn"),
       devBtn: $("devBtn"),
