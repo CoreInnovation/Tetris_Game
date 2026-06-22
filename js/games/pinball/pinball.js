@@ -145,6 +145,13 @@
       return this.theme.name;
     }
     _applyMusic() { this.audio.playMusic(SONGS[this.songIdx].song); }
+    menus() {
+      const self = this;
+      return {
+        music: { options: SONGS.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("pinball:song", i); self._applyMusic(); self._flash(SONGS[i].name); } },
+        skin: { options: P.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = P.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("pinball:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
+      };
+    }
     cycleMusic() {
       this.songIdx = (this.songIdx + 1) % SONGS.length;
       this.shell.storage.set("pinball:song", this.songIdx);

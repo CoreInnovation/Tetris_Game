@@ -150,6 +150,13 @@
     }
     _applyMusic() { this.audio.playMusic(SONGS[this.songIdx].song); this._applyTempo(); }
     _applyTempo() { const base = SONGS[this.songIdx].song.bpm; this.audio.setMusicTempo(Math.round(base * Math.min(1.8, 1 + (this.wave - 1) * 0.06))); }
+    menus() {
+      const self = this;
+      return {
+        music: { options: SONGS.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("missile:song", i); self._applyMusic(); self._toast("♪ " + SONGS[i].name); } },
+        skin: { options: M.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = M.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("missile:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
+      };
+    }
     cycleMusic() {
       this.songIdx = (this.songIdx + 1) % SONGS.length;
       this.shell.storage.set("missile:song", this.songIdx);
