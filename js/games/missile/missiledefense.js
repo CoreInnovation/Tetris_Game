@@ -16,7 +16,7 @@
   const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9, SEEK_REACH = 200;
   const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000;
   const HORNET_SPEED = 430, HORNET_TURN = 6.5, BH_PULL = 340, ZIG_AMP = 48;   // hornets nerfed: slower + lazier tracking
-  const DOCK_H = 84, POWERUP_LIFE = 11000, POWERUP_SLOTS = 3;   // bottom control dock + how long a pickup waits to be grabbed
+  const DOCK_H = 120, POWERUP_LIFE = 11000, POWERUP_SLOTS = 3;   // two-row bottom control dock + how long a pickup waits to be grabbed
 
   // Primitive stats only — reload/heat/cool are DERIVED below from a balance model.
   // minWave = the wave a weapon becomes ELIGIBLE to drop (powerful ones arrive later, so they're
@@ -73,6 +73,23 @@
   ];
   const SMAP = {}; STREAKS.forEach(s => SMAP[s.id] = s);
   M.STREAKS = STREAKS;
+
+  // ---- MILITIA UPGRADES: a SEPARATE set of buffs for the townsfolk's little guns (not your weapons, not killstreaks) ----
+  // Collected from PERSON-marked pickups, held up to TOWN_MAX(4). 5 wild defense weapons the crowd auto-fires at
+  // incoming threats + 2 enhancers (RANGE SCOPE reaches farther & fires faster, AMMO CRATE = more shots per volley).
+  // Enhancers level up if re-collected (still one slot). Each weapon arrives as the waves climb (minWave).
+  const TOWN_MAX = 4, TOWN_LVL_MAX = 4;
+  const TOWN_UPGRADES = [
+    { id: "buckshot", name: "BUCKSHOT",       short: "BUCK", kind: "weapon", minWave: 2, range: 300, sfx: "launch",    color: "#ffd24a" },   // fans a spread of pellets
+    { id: "rockets",  name: "BOTTLE ROCKETS", short: "RKT",  kind: "weapon", minWave: 3, range: 470, sfx: "eject",     color: "#ff7a3a" },   // arcs up, bursts into a firework
+    { id: "molotov",  name: "MOLOTOVS",       short: "MLTV", kind: "weapon", minWave: 4, range: 360, sfx: "artillery", color: "#ff5a2a" },   // lobs a bottle -> fire patch
+    { id: "bees",     name: "ANGRY BEES",     short: "BEES", kind: "weapon", minWave: 5, range: 380, sfx: "ufo",       color: "#ffe14d" },   // releases homing stingers
+    { id: "tesla",    name: "TESLA FENCE",    short: "FNCE", kind: "weapon", minWave: 6, range: 165, sfx: "zap",       color: "#b388ff" },   // chain-lightning between threats
+    { id: "range",    name: "RANGE SCOPE",    short: "RNG",  kind: "range",  minWave: 2,             sfx: "select",     color: "#7afcff" },   // +reach, +fire rate
+    { id: "ammo",     name: "AMMO CRATE",     short: "AMMO", kind: "multi",  minWave: 3,             sfx: "select",     color: "#9aff6a" }    // +shots per volley, more cities fire
+  ];
+  const TUMAP = {}; TOWN_UPGRADES.forEach(u => TUMAP[u.id] = u);
+  M.TOWN_UPGRADES = TOWN_UPGRADES;
 
   // ---- ENEMY KINDS: distinct falling threats, introduced as waves climb ----
   const ENEMY_KINDS = [
@@ -156,6 +173,9 @@
       this.reload = {}; this.cdT = {}; this.heat = {}; this.idleT = {}; this.reloadMax = {}; this.cdMax = {};
       WEAPONS.forEach(w => { this.reload[w.id] = 0; this.cdT[w.id] = 0; this.heat[w.id] = 0; this.idleT[w.id] = 9999; });
       this.multishot = 1; this.multishotT = 0;
+      // ---- MILITIA (townsfolk) upgrades — tracked entirely separate from weapons/killstreaks ----
+      this.townShots = []; this.townUpgrades = []; this.townUnlocked = {}; this.townRangeLvl = 0; this.townMultiLvl = 0; this.townFireT = 1400; this.militiaSlots = [];
+      if (this.dev) { this.townUpgrades = ["buckshot", "rockets", "molotov", "bees"]; this.townRangeLvl = 1; this.townMultiLvl = 1; TOWN_UPGRADES.forEach(u => { this.townUnlocked[u.id] = true; }); }
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0;
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
@@ -204,8 +224,12 @@
     }
     toggleDev() {
       this.dev = !this.dev;
-      if (this.dev) WEAPONS.forEach(w => { this.unlocked[w.id] = true; });
-      else { WEAPONS.forEach(w => { this.unlocked[w.id] = false; }); this.collected.forEach(id => { this.unlocked[id] = true; }); if (!this.unlocked[this.weapon]) this.weapon = "interceptor"; }
+      if (this.dev) {
+        WEAPONS.forEach(w => { this.unlocked[w.id] = true; });
+        this.townUpgrades = ["buckshot", "rockets", "molotov", "bees"]; this.townRangeLvl = Math.max(1, this.townRangeLvl); this.townMultiLvl = Math.max(1, this.townMultiLvl); TOWN_UPGRADES.forEach(u => { this.townUnlocked[u.id] = true; });
+      } else {
+        WEAPONS.forEach(w => { this.unlocked[w.id] = false; }); this.collected.forEach(id => { this.unlocked[id] = true; }); if (!this.unlocked[this.weapon]) this.weapon = "interceptor";
+      }
       this._layoutChips();
       this._toast(this.dev ? "DEV MODE ON — all weapons" : "DEV MODE OFF");
       return this.dev;
@@ -273,26 +297,32 @@
       this._layoutDock();
     }
 
-    // The bottom CONTROL DOCK: one sleek bar holding [ARSENAL .... INCOMING pickups .... KILLSTREAKS].
-    // Lays out clickable rects for weapons (left), powerup pickups (center-right), and killstreak slots (right).
+    // The bottom CONTROL DOCK, two rows so four sections stay sleek & uncramped:
+    //   row 1:  ARSENAL (your weapons, left)   ·   INCOMING (pickups, right)
+    //   row 2:  MILITIA (townsfolk upgrades, left)   ·   KILLSTREAKS (right)
+    // Lays out clickable rects for weapons/pickups/streaks; militia tiles are display-only.
     _layoutDock() {
-      const w = this._w || 800, pad = 10, gap = 6;
-      const rowY = this.dockTop + 18, tileH = this.dockH - 26;
-      // KILLSTREAKS — square slots anchored to the right edge
+      const w = this._w || 800, pad = 10, gap = 6, labelH = 12, tileH = 38;
+      const row1Y = this.dockTop + labelH + 4;            // dockTop + 16
+      const row2Y = row1Y + tileH + labelH + 4;           // dockTop + 70
+      // right column width is governed by the widest right block (killstreaks)
       const sTile = tileH, streakBlockW = STREAK_MAX * sTile + (STREAK_MAX - 1) * gap;
-      const streaksLeft = w - pad - streakBlockW;
+      const rightLeft = w - pad - streakBlockW;
       this.streakSlots = [];
-      for (let i = 0; i < STREAK_MAX; i++) this.streakSlots.push({ x: streaksLeft + i * (sTile + gap), y: rowY, w: sTile, h: tileH });
-      // INCOMING pickups — a few square slots just left of the streaks
-      const pTile = tileH, pickBlockW = POWERUP_SLOTS * pTile + (POWERUP_SLOTS - 1) * gap;
-      const pickLeft = streaksLeft - 16 - pickBlockW;
+      for (let i = 0; i < STREAK_MAX; i++) this.streakSlots.push({ x: rightLeft + i * (sTile + gap), y: row2Y, w: sTile, h: tileH });
+      // INCOMING pickups — right-aligned on row 1 (same right edge as the streaks)
+      const pTile = tileH, pickBlockW = POWERUP_SLOTS * pTile + (POWERUP_SLOTS - 1) * gap, pickLeft = w - pad - pickBlockW;
       this.pickupSlots = [];
-      for (let i = 0; i < POWERUP_SLOTS; i++) this.pickupSlots.push({ x: pickLeft + i * (pTile + gap), y: rowY, w: pTile, h: tileH });
-      // ARSENAL — your held weapons fill the remaining space on the left (dev shows all)
+      for (let i = 0; i < POWERUP_SLOTS; i++) this.pickupSlots.push({ x: pickLeft + i * (pTile + gap), y: row1Y, w: pTile, h: tileH });
+      // MILITIA — townsfolk upgrade slots on row 2 left
+      const mTile = tileH, milBlockW = TOWN_MAX * mTile + (TOWN_MAX - 1) * gap;
+      this.militiaSlots = [];
+      for (let i = 0; i < TOWN_MAX; i++) this.militiaSlots.push({ x: pad + i * (mTile + gap), y: row2Y, w: mTile, h: tileH });
+      // ARSENAL — your held weapons fill row 1 left (dev shows all), bounded by the INCOMING block
       const ids = this.dev ? WEAPONS.map(wp => wp.id) : (this.collected ? this.collected.slice() : ["interceptor"]);
-      const n = Math.max(1, ids.length), wLeft = pad, wRight = pickLeft - 16, avail = Math.max(120, wRight - wLeft);
-      const cw = Math.max(34, Math.min(110, Math.floor((avail - (n - 1) * gap) / n)));
-      this.weaponChips = ids.map((id, i) => ({ id: id, x: wLeft + i * (cw + gap), y: rowY, w: cw, h: tileH }));
+      const n = Math.max(1, ids.length), wLeft = pad, wRight = pickLeft - 14, avail = Math.max(120, wRight - wLeft);
+      const cw = Math.max(34, Math.min(96, Math.floor((avail - (n - 1) * gap) / n)));
+      this.weaponChips = ids.map((id, i) => ({ id: id, x: wLeft + i * (cw + gap), y: row1Y, w: cw, h: tileH }));
     }
     _layoutChips() { this._layoutDock(); }   // legacy alias (dev toggle / collect calls)
 
@@ -368,16 +398,46 @@
     // Pickups no longer fall through the play area — they arrive in the bottom dock's INCOMING slots, where you click to grab them.
     _spawnPowerup() {
       if (this.powerups.length >= POWERUP_SLOTS) return;
-      const add = (extra, label) => { this.powerups.push(Object.assign({ t: 0, life: POWERUP_LIFE }, extra)); this.audio.play("ufo"); this._toast("PICKUP ↓ " + label, false, "#ffd24a"); };
+      const add = (extra, label, col) => { this.powerups.push(Object.assign({ t: 0, life: POWERUP_LIFE }, extra)); this.audio.play("ufo"); this._toast("PICKUP ↓ " + label, false, col || "#ffd24a"); };
       const mult = () => { const m = Math.random() < 0.62 ? 2 : 3; add({ kind: "mult", mult: m }, "×" + m + " FIRE"); };
-      if (Math.random() < 0.32) return mult();   // sometimes a MULTI-FIRE pod instead of a weapon
-      // only offer weapons the wave has unlocked (powerful ones arrive later); prefer ones you don't have yet
+      const town = () => {   // a MILITIA upgrade for the townsfolk (prefer weapons you don't have yet; enhancers can repeat to level up)
+        const elig = TOWN_UPGRADES.filter(u => (u.minWave || 1) <= this.wave);
+        const fresh = elig.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
+        const pool = fresh.length ? fresh : elig;
+        const u = pool[(Math.random() * pool.length) | 0];
+        add({ town: u.id }, u.name, u.color);
+      };
+      // weighted category roll, adapting to what the wave has unlocked
+      const wpnElig = WEAPONS.some(w => !w.base && (w.minWave || 1) <= this.wave);
+      const townElig = TOWN_UPGRADES.some(u => (u.minWave || 1) <= this.wave);
+      const cats = [["mult", 3]];
+      if (wpnElig) cats.push(["weapon", 5]);
+      if (townElig) cats.push(["town", 4]);
+      let total = cats.reduce((a, c) => a + c[1], 0), r = Math.random() * total, pick = cats[0][0];
+      for (const c of cats) { if (r < c[1]) { pick = c[0]; break; } r -= c[1]; }
+      if (pick === "mult") return mult();
+      if (pick === "town") return town();
+      const locked = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave && !this.unlocked[w.id]);
       const eligible = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave);
-      if (!eligible.length) return mult();
-      const locked = eligible.filter(w => !this.unlocked[w.id]);
       const pool = locked.length ? locked : eligible;
       const w = pool[(Math.random() * pool.length) | 0];
-      add({ weapon: w.id }, w.name);
+      add({ weapon: w.id }, w.name, w.color);
+    }
+
+    // collect a MILITIA upgrade: weapons fill the 4-slot town inventory; RANGE/AMMO enhancers level up (one slot each)
+    _collectTownUpgrade(id) {
+      const u = TUMAP[id]; if (!u) return false;
+      if (u.kind === "range") this.townRangeLvl = Math.min(TOWN_LVL_MAX, this.townRangeLvl + 1);
+      else if (u.kind === "multi") this.townMultiLvl = Math.min(TOWN_LVL_MAX, this.townMultiLvl + 1);
+      const had = this.townUpgrades.includes(id);
+      if (!had) {
+        this.townUpgrades.push(id); this.townUnlocked[id] = true;
+        while (this.townUpgrades.length > TOWN_MAX) { const drop = this.townUpgrades.find(x => x !== id); if (!drop) break; this.townUpgrades.splice(this.townUpgrades.indexOf(drop), 1); delete this.townUnlocked[drop]; }
+      }
+      const lvl = u.kind === "range" ? this.townRangeLvl : (u.kind === "multi" ? this.townMultiLvl : 0);
+      this.audio.play("extralife");
+      this._toast("MILITIA — " + u.name + (lvl > 1 ? " Lv" + lvl : "") + "!", true, u.color);
+      return true;
     }
 
     _collectPowerup(pu) {
@@ -387,6 +447,13 @@
         this._toast((pu.mult === 3 ? "TRIPLE" : "DOUBLE") + " FIRE!  ×" + pu.mult, true);
         if (this.theme.effects.particles) this.particles.emit({ x: pu.x, y: pu.y, count: 28,
           colors: ["#ffd24a", "#ffae3b", "#ffffff"], speedMin: 50, speedMax: 280, gravity: 60, drag: 1,
+          sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle", spin: 6 });
+        return;
+      }
+      if (pu.town) {   // a MILITIA upgrade for the townsfolk (separate set)
+        const u = TUMAP[pu.town]; this._collectTownUpgrade(pu.town);
+        if (this.theme.effects.particles) this.particles.emit({ x: pu.x, y: pu.y, count: 26,
+          colors: [(u && u.color) || "#9aff6a", "#ffe08a", "#ffffff"], speedMin: 50, speedMax: 280, gravity: 60, drag: 1,
           sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle", spin: 6 });
         return;
       }
@@ -409,6 +476,41 @@
       this.tracers.push({ x: px, y: py, vx: dx / d * sp, vy: dy / d * sp, life: rand(0.32, 0.6) });
       if (this.theme.effects.particles && Math.random() < 0.5) this.particles.emit({ x: px, y: py - 2, count: 2, colors: ["#ffe08a", "#ffffff"],
         speedMin: 8, speedMax: 46, gravity: 0, drag: 2.2, sizeMin: 1, sizeMax: 2, lifeMin: 0.08, lifeMax: 0.22, glow: this.theme.effects.glow, shape: "circle" });
+    }
+
+    // ---------------- MILITIA: the townsfolk's upgraded little guns ----------------
+    _townDamage(x, y, r, color, pts) {   // direct town hits (buckshot pellets, bee stings)
+      let any = false;
+      for (let j = this.enemies.length - 1; j >= 0; j--) { const m = this.enemies[j]; if (Math.hypot(m.x - x, m.y - y) < r) { this.enemies.splice(j, 1); this.score += (pts || 12) + this.wave * 4; this._addKill(); this._burst(m.x, m.y, color || "#ffe066", 8); any = true; } }
+      for (let j = this.ufos.length - 1; j >= 0; j--) { const u = this.ufos[j]; if (Math.hypot(u.x - x, u.y - y) < r + u.radius) { this.ufos.splice(j, 1); const p = 150 + this.wave * 25; this.score += p; this._addKill(); this._toast("UFO! +" + p, true); this._burst(u.x, u.y, "#46f0c0", 18); any = true; } }
+      return any;
+    }
+    _townNearest(cx, by, range) { let tgt = null, bd = range; for (const m of this.enemies) { const d = Math.hypot(m.x - cx, m.y - by); if (d < bd) { bd = d; tgt = m; } } return tgt; }
+
+    // fire one militia weapon `id` from a city at `cx` (range already scaled by the RANGE SCOPE level)
+    _townFire(cx, id, rangeMul, extraShots) {
+      const u = TUMAP[id], by = this.groundY - 9, col = u.color, range = (u.range || 320) * rangeMul;
+      const tgt = this._townNearest(cx, by, range);
+      if (!tgt && id !== "molotov") return false;   // need something in reach (molotov can still lob at the nearest threat)
+      this.audio.play(u.sfx);
+      if (this.theme.effects.particles) this.particles.emit({ x: cx, y: by, count: 5, colors: [col, "#ffffff"], speedMin: 30, speedMax: 150, angleMin: -Math.PI * 0.85, angleMax: -Math.PI * 0.15, gravity: 120, drag: 1.2, sizeMin: 1.4, sizeMax: 3, lifeMin: 0.15, lifeMax: 0.4, glow: this.theme.effects.glow, shape: "circle" });
+      if (id === "buckshot") {
+        const n = 3 + this.townMultiLvl + extraShots, base = Math.atan2((tgt.y) - by, tgt.x - cx);
+        for (let i = 0; i < n; i++) { const a = base + (i - (n - 1) / 2) * 0.14 + rand(-0.04, 0.04), sp = rand(620, 720); this.townShots.push({ type: "pellet", x: cx, y: by, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.4 * rangeMul + 0.2, color: col }); }
+      } else if (id === "rockets") {
+        const n = 1 + Math.floor((this.townMultiLvl + extraShots) / 1.5) + (extraShots > 1 ? 1 : 0);
+        for (let i = 0; i < Math.max(1, n); i++) { const t2 = this._townNearest(cx + rand(-30, 30), by, range) || tgt; this.townShots.push({ type: "rocket", x: cx + rand(-8, 8), y: by, tx: t2.x, ty: t2.y, spd: 540, color: col, spin: rand(0, 6.28) }); }
+      } else if (id === "molotov") {
+        const aimx = tgt ? tgt.x : cx + rand(-160, 160), n = 1 + Math.floor((this.townMultiLvl + extraShots) / 2);
+        for (let i = 0; i < n; i++) { const tx = aimx + rand(-30, 30) * i, dx = tx - cx; this.townShots.push({ type: "molotov", x: cx, y: by, vx: dx / 0.95 * 0.5, vy: -rand(360, 460), spin: rand(0, 6.28), color: col, r: rand(30, 42) * rangeMul }); }
+      } else if (id === "bees") {
+        const n = 2 + this.townMultiLvl + extraShots;
+        for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + rand(-0.8, 0.8); this.townShots.push({ type: "bee", x: cx + rand(-10, 10), y: by - rand(0, 8), heading: a, spd: rand(230, 290), fuse: 2.2 + rangeMul * 0.4, wig: rand(0, 6.28), color: col }); }
+      } else if (id === "tesla") {
+        this._chainZap(cx, by - 4, col, 3 + this.townMultiLvl + extraShots);   // chain-lightning leaps between nearby threats
+        if (this.theme.effects.shake) this._shake(3);
+      }
+      return true;
     }
 
     _spawnUfo() {
@@ -562,6 +664,14 @@
       }
       if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: 16, colors: ["#ffe14a", "#ff8a2a", "#ff4a1a"],
         speedMin: 60, speedMax: 320, gravity: 200, drag: 1, sizeMin: 2, sizeMax: 4.5, lifeMin: 0.3, lifeMax: 0.8, glow: this.theme.effects.glow, shape: "circle" });
+    }
+
+    // a townsfolk bottle-rocket bursts into a colorful firework — the _blast handles the kills, the sparks are the show
+    _fireworkBurst(x, y, color) {
+      this._blast(x, y, 34, color);
+      if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: 30,
+        colors: ["#ff4d4d", "#ffd24a", "#5ad1ff", "#9aff6a", "#ff7adf", "#ffffff"], speedMin: 60, speedMax: 320,
+        gravity: 120, drag: 0.9, sizeMin: 1.5, sizeMax: 3.6, lifeMin: 0.4, lifeMax: 1.1, glow: this.theme.effects.glow, shape: "circle", spin: 8 });
     }
 
     // ---------------- killstreaks ----------------
@@ -880,6 +990,50 @@
         }
         if (hit || tr.life <= 0 || tr.y < -12) this.tracers.splice(i, 1);
       }
+
+      // ---- MILITIA volleys: when you've armed the townsfolk, the crowd auto-fires its upgraded guns at threats ----
+      const townWeapons = this.townUpgrades.filter(id => TUMAP[id].kind === "weapon");
+      if (townWeapons.length && this.enemies.length) {
+        this.townFireT -= dt;
+        if (this.townFireT <= 0) {
+          const rangeMul = 1 + this.townRangeLvl * 0.35;
+          const baseCd = Math.max(300, 1050 - this.townMultiLvl * 110 - this.townRangeLvl * 60);   // RANGE + AMMO both quicken the cadence
+          this.townFireT = baseCd * rand(0.75, 1.25);
+          const alive = this.cities.filter(c => c.alive);
+          if (alive.length) {
+            const volleys = 1 + Math.floor(this.townMultiLvl / 2);   // AMMO CRATE: more cities open up at once
+            for (let v = 0; v < volleys; v++) { const c = alive[(Math.random() * alive.length) | 0]; const wid = townWeapons[(Math.random() * townWeapons.length) | 0]; this._townFire(c.x, wid, rangeMul, 0); }
+          }
+        }
+      }
+      // town projectiles: pellets fly straight, bees home, rockets burst into fireworks, molotovs lob into fire
+      for (let i = this.townShots.length - 1; i >= 0; i--) {
+        const t = this.townShots[i]; let dead = false;
+        if (t.type === "pellet") {
+          t.x += t.vx * s; t.y += t.vy * s; t.life -= s;
+          if (this._townDamage(t.x, t.y, 13, t.color, 10)) dead = true;
+          else if (t.life <= 0 || t.y < -14 || t.x < -14 || t.x > this._w + 14) dead = true;
+        } else if (t.type === "bee") {
+          const tg = this._townNearest(t.x, t.y, 1e9);
+          if (tg) { let diff = Math.atan2(tg.y - t.y, tg.x - t.x) - t.heading; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2; const mt = 7 * s; t.heading += Math.max(-mt, Math.min(mt, diff)); }
+          t.wig += s * 22; const perp = t.heading + Math.PI / 2, wob = Math.sin(t.wig) * 34;
+          t.x += Math.cos(t.heading) * t.spd * s + Math.cos(perp) * wob * s; t.y += Math.sin(t.heading) * t.spd * s + Math.sin(perp) * wob * s; t.fuse -= s;
+          if (this.theme.effects.particles && Math.random() < 0.3) this.particles.emit({ x: t.x, y: t.y, count: 1, colors: [t.color, "#3a2a00"], speedMin: 2, speedMax: 14, gravity: 0, drag: 2, sizeMin: 1, sizeMax: 2, lifeMin: 0.1, lifeMax: 0.3, glow: this.theme.effects.glow, shape: "circle" });
+          if (this._townDamage(t.x, t.y, 12, t.color, 9)) dead = true;
+          else if (t.fuse <= 0 || t.y > this.groundY) dead = true;
+        } else if (t.type === "rocket") {
+          const dx = t.tx - t.x, dy = t.ty - t.y, d = Math.hypot(dx, dy) || 1, step = t.spd * s; t.spin += s * 12;
+          if (this.theme.effects.particles) this.particles.emit({ x: t.x, y: t.y, count: 1, colors: ["#fff1b0", t.color, "#ff3a1a"], speedMin: 4, speedMax: 26, gravity: 30, drag: 1.4, sizeMin: 1.4, sizeMax: 3, lifeMin: 0.18, lifeMax: 0.45, glow: this.theme.effects.glow, shape: "circle" });
+          if (d <= step + 6 || this._townNearest(t.x, t.y, 16)) { this._fireworkBurst(t.x, t.y, t.color); dead = true; }
+          else { t.x += dx / d * step; t.y += dy / d * step; }
+        } else if (t.type === "molotov") {
+          t.vy += 620 * s; t.x += t.vx * s; t.y += t.vy * s; t.spin += s * 10;
+          if (t.y >= this.groundY - 4 || this._townNearest(t.x, t.y, 14)) { this._spawnFire(t.x, Math.min(t.y, this.groundY - 4), t.r, 2.0, t.color); this._blast(t.x, Math.min(t.y, this.groundY - 4), 24, t.color); dead = true; }
+          else if (t.x < -20 || t.x > this._w + 20) dead = true;
+        }
+        if (dead) this.townShots.splice(i, 1);
+      }
+
       if (anyPanic && !this._prevPanic) { this.sirenT = 0; this.crowdT = 0; }   // siren only re-arms on a genuine calm->panic transition (no flicker spam)
       if (anyPanic) {
         this.sirenT -= dt; if (this.sirenT <= 0) { this.audio.play("siren"); this.sirenT = 9000; }
@@ -920,6 +1074,7 @@
       for (const gb of this.napGlobs) R.drawEmber(ctx, th, gb);
       for (const mt of this.meteors) R.drawEmber(ctx, th, mt);
       for (const ds of this.droneShots) R.drawEmber(ctx, th, ds);
+      for (const ts of this.townShots) R.drawTownShot(ctx, th, ts, now);
       for (const d of this.drones) R.drawDrone(ctx, th, d, now);
       if (this.volcano) R.drawVolcano(ctx, th, this.volcano, now);
       for (const z of this.zaps) R.drawZap(ctx, th, z);
@@ -933,15 +1088,18 @@
         rect: ch, short: w.short, id: ch.id, color: w.color, locked: !this.unlocked[ch.id], active: this.weapon === ch.id,
         heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / (this.cdMax[ch.id] || w.cd)) : 0,
         reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / (this.reloadMax[ch.id] || w.reload), keyNum: WEAPONS.indexOf(w) + 1 }; });
-      const picks = this.powerups.map((pu, i) => ({ rect: this.pickupSlots[i],
-        weaponId: pu.weapon, mult: pu.mult, isMult: pu.kind === "mult",
-        color: pu.kind === "mult" ? "#ffd24a" : ((WMAP[pu.weapon] && WMAP[pu.weapon].color) || th.palette.powerup),
-        label: pu.kind === "mult" ? ("×" + pu.mult) : (WMAP[pu.weapon] ? WMAP[pu.weapon].short : "?"),
-        frac: Math.max(0, 1 - pu.t / pu.life) })).filter(p => p.rect);
+      const picks = this.powerups.map((pu, i) => { const tu = pu.town ? TUMAP[pu.town] : null; return { rect: this.pickupSlots[i],
+        weaponId: pu.weapon, townId: pu.town, isMult: pu.kind === "mult", mult: pu.mult, isTown: !!pu.town,
+        color: pu.town ? tu.color : (pu.kind === "mult" ? "#ffd24a" : ((WMAP[pu.weapon] && WMAP[pu.weapon].color) || th.palette.powerup)),
+        label: pu.town ? tu.short : (pu.kind === "mult" ? ("×" + pu.mult) : (WMAP[pu.weapon] ? WMAP[pu.weapon].short : "?")),
+        frac: Math.max(0, 1 - pu.t / pu.life) }; }).filter(p => p.rect);
       const strk = this.streaks.map((id, i) => ({ rect: this.streakSlots[i], id: id, icon: SMAP[id].icon, color: SMAP[id].color,
         name: SMAP[id].name, picked: this._rmbDown && i === this._streakSel })).filter(s => s.rect);
+      const militia = this.townUpgrades.map((id, i) => { const u = TUMAP[id]; return { rect: this.militiaSlots[i], id: id, short: u.short, color: u.color,
+        lvl: u.kind === "range" ? this.townRangeLvl : (u.kind === "multi" ? this.townMultiLvl : 0) }; }).filter(m => m.rect);
       R.drawDock(ctx, th, { dockTop: this.dockTop, dockH: this.dockH, w: this._w, now: now,
         weapons: chips, pickups: picks, pickupSlots: this.pickupSlots, streaks: strk, streakSlots: this.streakSlots,
+        militia: militia, militiaSlots: this.militiaSlots,
         meter: this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1,
         nextSlot: Math.min(this.streaks.length, STREAK_MAX - 1) });
       if (this.betweenWaves) {   // breather countdown between waves
