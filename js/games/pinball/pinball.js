@@ -18,7 +18,7 @@
   const PW = 420, PH = 680;                 // logical playfield
   const G = 1000, REST = 0.45, BALL_R = 9, MAXV = 1350;
   const BUMP_KICK = 360, SLING_KICK = 330, FLIP_BOOST = 600, FLIP_ANG = 27;
-  const PLUNGE_MIN = 1120, PLUNGE_MAX = 1320, DRAIN_Y = 662, MAX_BALLS = 5;
+  const PLUNGE_MIN = 1120, PLUNGE_MAX = 1320, DRAIN_Y = 656, MAX_BALLS = 5;
   const LOCK_NEED = 3;                       // locks to light multiball
 
   // ---- music (original) ----
@@ -107,23 +107,23 @@
       W.push(seg(196, 60, 196, 104));
       W.push(seg(254, 60, 254, 104));
 
-      // ---- lower playfield: outer rails, outlane dividers, inlane feeds (mirrored about x≈190) ----
+      // ---- lower playfield: outer walls funnel toward the flippers; NARROW outlanes that drain clean ----
+      // Each outer wall rides DOWN PAST the drain line so a side ball always exits; each outlane divider
+      // ENDS ABOVE the drain (single-walled below it) so the ball can never pinch/wedge above the drain.
       // LEFT
-      W.push(seg(24, 470, 48, 582));           // left outer rail
-      W.push(seg(48, 582, 82, 648));           // left outer rail -> bottom-left drain corner
-      W.push(seg(118, 560, 100, 648));         // left divider (outlane | inlane)
-      W.push(seg(140, 556, 132, 598));         // left inlane feed -> delivers onto the flipper
-      // RIGHT (mirror about x=190)
-      W.push(seg(372, 470, 334, 582));         // right outer rail (drops off the launch-lane wall)
-      W.push(seg(334, 582, 298, 648));         // right outer rail -> bottom-right drain corner
-      W.push(seg(262, 560, 280, 648));         // right divider
-      W.push(seg(240, 556, 248, 598));         // right inlane feed
+      W.push(seg(24, 470, 58, 582));           // left outer wall (funnels inward toward the flipper)
+      W.push(seg(58, 582, 96, 666));           // left outer wall -> drops past the drain
+      W.push(seg(88, 556, 94, 604));           // left outlane divider (ends high; thin outlane outside the flipper)
+      // RIGHT (mirror about x≈190)
+      W.push(seg(372, 470, 322, 582));         // right outer wall
+      W.push(seg(322, 582, 284, 666));         // right outer wall -> drops past the drain
+      W.push(seg(292, 556, 286, 604));         // right outlane divider
       this.walls = W;
 
-      // ---- slingshots (kicking faces; normals point toward center) ----
+      // ---- slingshots (kicking faces above each flipper; normals point toward center) ----
       this.slings = [
-        { x1: 100, y1: 534, x2: 120, y2: 590, hit: 0 },   // left
-        { x1: 280, y1: 534, x2: 260, y2: 590, hit: 0 }    // right
+        { x1: 96, y1: 544, x2: 128, y2: 596, hit: 0 },    // left
+        { x1: 284, y1: 544, x2: 252, y2: 596, hit: 0 }    // right
       ];
 
       // ---- pop bumpers (upper cluster) ----
@@ -135,10 +135,10 @@
         { x: 78, y: 250, r: 13, hit: 0 }
       ];
 
-      // ---- flippers: wide pivots, ~26px center drain gap (~1.5 balls); centered on x≈190 ----
+      // ---- flippers: long bats that cover the bottom, ~26px center drain gap; centered on x≈190 ----
       this.flippers = [
-        { px: 124, py: 600, len: 62, thick: 8, rest: 0.55, active: -0.55, angle: 0.55, prev: 0.55, angVel: 0, pressed: false },
-        { px: 256, py: 600, len: 62, thick: 8, rest: Math.PI - 0.55, active: Math.PI + 0.55, angle: Math.PI - 0.55, prev: Math.PI - 0.55, angVel: 0, pressed: false }
+        { px: 116, py: 598, len: 70, thick: 8, rest: 0.50, active: -0.55, angle: 0.50, prev: 0.50, angVel: 0, pressed: false },
+        { px: 264, py: 598, len: 70, thick: 8, rest: Math.PI - 0.50, active: Math.PI + 0.55, angle: Math.PI - 0.50, prev: Math.PI - 0.50, angVel: 0, pressed: false }
       ];
 
       // ---- two drop-target banks ----
@@ -179,16 +179,16 @@
         { x: 283, y: 82, lit: false, ch: "P" }
       ];
 
-      // ---- inlane/outlane rollover trigger zones ----
+      // ---- inlane/outlane rollover trigger zones (inlane = above the flipper inner side; outlane = the thin outer drain) ----
       this.lanes = [
-        { kind: "out", side: "L", x: 58, y: 596, w: 44, h: 56, lit: false, cool: 0 },
-        { kind: "in", side: "L", x: 104, y: 572, w: 40, h: 52, lit: false, cool: 0 },
-        { kind: "in", side: "R", x: 236, y: 572, w: 40, h: 52, lit: false, cool: 0 },
-        { kind: "out", side: "R", x: 278, y: 596, w: 44, h: 56, lit: false, cool: 0 }
+        { kind: "out", side: "L", x: 60, y: 580, w: 34, h: 64, lit: false, cool: 0 },
+        { kind: "in", side: "L", x: 122, y: 556, w: 42, h: 48, lit: false, cool: 0 },
+        { kind: "in", side: "R", x: 216, y: 556, w: 42, h: 48, lit: false, cool: 0 },
+        { kind: "out", side: "R", x: 286, y: 580, w: 34, h: 64, lit: false, cool: 0 }
       ];
 
       // ---- KICKBACK in the left outlane ----
-      this.kickback = { x: 80, y: 642, charged: true, glow: 0 };
+      this.kickback = { x: 78, y: 644, charged: true, glow: 0 };
 
       this.plungerX = 384;
       // habitrail RAMP scripted path: enter top-left, loop over the top, drop into the right inlane
@@ -352,7 +352,7 @@
       // anti-stall failsafe: a ball that stalls in play (wedged in a pocket) gets a gentle nudge so nothing freezes
       for (const b of this.balls) {
         if (b.mode !== "play") { b.stillT = 0; continue; }
-        if (Math.hypot(b.vx, b.vy) < 12 && b.y < DRAIN_Y - 16) { b.stillT = (b.stillT || 0) + dt; if (b.stillT > 2000) { b.vx += rand(-180, 180); b.vy -= rand(180, 320); b.stillT = 0; } }
+        if (Math.hypot(b.vx, b.vy) < 12 && b.y < DRAIN_Y) { b.stillT = (b.stillT || 0) + dt; if (b.stillT > 2000) { b.vx += rand(-180, 180); b.vy -= rand(180, 320); b.stillT = 0; } }
         else b.stillT = 0;
       }
 
@@ -363,7 +363,7 @@
         if (b.y > DRAIN_Y) {
           if (this.dev) { b.y = DRAIN_Y - 4; b.vy = -Math.abs(b.vy) - 200; continue; }
           // left outlane kickback save
-          if (b.x > 60 && b.x < 104 && this.kickback.charged) {
+          if (b.x > 56 && b.x < 100 && this.kickback.charged) {
             this.kickback.charged = false; this.kickback.glow = 0.6; b.y = 600; b.vy = -1020; b.vx = rand(40, 120); b.mode = "play";
             this.audio.play("plunger"); this._flash("KICKBACK SAVE!"); this._burst(b.x, b.y, this.theme.palette.kick, 14); if (this.theme.effects.shake) this._shake(4);
             continue;
