@@ -273,6 +273,79 @@
       ctx.restore();
     }
 
+    // crisp vector glyph per MILITIA upgrade
+    drawTownIcon(ctx, id, cx, cy, s, color) {
+      const r = s * 0.5, TAU = Math.PI * 2;
+      ctx.save(); ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.3, s * 0.1); ctx.lineCap = "round"; ctx.lineJoin = "round";
+      if (id === "buckshot") {   // shell + spreading pellets
+        ctx.fillRect(cx - r * 0.28, cy + r * 0.35, r * 0.56, r * 0.5);
+        for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.arc(cx + k * r * 0.6, cy - r * 0.55, r * 0.18, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.moveTo(cx + k * 0.2, cy + r * 0.3); ctx.lineTo(cx + k * r * 0.6, cy - r * 0.35); ctx.globalAlpha = 0.5; ctx.stroke(); ctx.globalAlpha = 1; }
+      } else if (id === "rockets") {   // bottle rocket on a stick + spark
+        ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 0.3, cy - r * 0.3); ctx.lineTo(cx - r * 0.3, cy - r * 0.3); ctx.closePath(); ctx.fill();
+        ctx.fillRect(cx - r * 0.12, cy - r * 0.3, r * 0.24, r * 0.8);
+        ctx.beginPath(); ctx.moveTo(cx, cy + r * 0.5); ctx.lineTo(cx, cy + r); ctx.stroke();
+        ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(cx, cy - r, r * 0.18, 0, TAU); ctx.fill();
+      } else if (id === "molotov") {   // bottle with a flaming rag
+        ctx.fillStyle = rgba(color, 0.5); rr(ctx, cx - r * 0.4, cy - r * 0.2, r * 0.8, r * 1.1, r * 0.3); ctx.fill();
+        ctx.strokeStyle = color; rr(ctx, cx - r * 0.4, cy - r * 0.2, r * 0.8, r * 1.1, r * 0.3); ctx.stroke();
+        ctx.fillRect(cx - r * 0.14, cy - r * 0.55, r * 0.28, r * 0.4);
+        ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(cx, cy - r * 0.75, r * 0.22, 0, TAU); ctx.fill();
+      } else if (id === "bees") {   // a little swarm
+        for (const o of [[-r * 0.5, -r * 0.2], [r * 0.45, -r * 0.4], [0, r * 0.4]]) { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx + o[0], cy + o[1], r * 0.26, 0, TAU); ctx.fill(); ctx.strokeStyle = rgba("#2a2200", 0.9); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx + o[0] - r * 0.26, cy + o[1]); ctx.lineTo(cx + o[0] + r * 0.26, cy + o[1]); ctx.stroke(); ctx.lineWidth = Math.max(1.3, s * 0.1); ctx.strokeStyle = color; }
+      } else if (id === "tesla") {   // lightning bolt between two posts
+        ctx.fillRect(cx - r * 0.85, cy - r * 0.7, r * 0.2, r * 1.5); ctx.fillRect(cx + r * 0.65, cy - r * 0.7, r * 0.2, r * 1.5);
+        ctx.beginPath(); ctx.moveTo(cx - r * 0.55, cy - r * 0.3); ctx.lineTo(cx + r * 0.05, cy - r * 0.05); ctx.lineTo(cx - r * 0.2, cy + r * 0.1); ctx.lineTo(cx + r * 0.55, cy + r * 0.4); ctx.stroke();
+      } else if (id === "range") {   // scope / reticle
+        ctx.beginPath(); ctx.arc(cx, cy, r * 0.7, 0, TAU); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, r * 0.16, 0, TAU); ctx.fill();
+      } else if (id === "ammo") {   // ammo crate
+        rr(ctx, cx - r * 0.8, cy - r * 0.55, r * 1.6, r * 1.1, 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - r * 0.8, cy - r * 0.2); ctx.lineTo(cx + r * 0.8, cy - r * 0.2); ctx.stroke();
+        ctx.fillRect(cx - r * 0.3, cy + r * 0.05, r * 0.18, r * 0.4); ctx.fillRect(cx + r * 0.12, cy + r * 0.05, r * 0.18, r * 0.4);
+      }
+      ctx.restore();
+    }
+
+    // tiny "townsperson" badge so pickups/upgrades clearly read as belonging to the crowd
+    _personBadge(ctx, x, y, s, color) {
+      ctx.save();
+      ctx.fillStyle = "rgba(6,9,14,0.92)"; ctx.beginPath(); ctx.arc(x, y, s * 0.95, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, s * 0.95, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x, y - s * 0.35, s * 0.3, 0, Math.PI * 2); ctx.fill();   // head
+      ctx.beginPath(); ctx.moveTo(x - s * 0.42, y + s * 0.5); ctx.quadraticCurveTo(x, y - s * 0.2, x + s * 0.42, y + s * 0.5); ctx.closePath(); ctx.fill();   // body
+      ctx.restore();
+    }
+
+    // townsfolk projectiles (their upgraded little guns)
+    drawTownShot(ctx, theme, t, now) {
+      const col = t.color || "#ffe066";
+      ctx.save();
+      if (t.type === "pellet") {
+        const sp = Math.hypot(t.vx, t.vy) || 1, L = 7;
+        this._glow(ctx, theme, col, theme.effects.glow ? 6 : 0);
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(t.x - t.vx / sp * L, t.y - t.vy / sp * L); ctx.stroke();
+      } else if (t.type === "bee") {
+        this._glow(ctx, theme, col, theme.effects.glow ? 8 : 0);
+        ctx.fillStyle = col; ctx.beginPath(); ctx.arc(t.x, t.y, 2.6, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "rgba(30,24,0,0.9)"; ctx.lineWidth = 1; const wf = Math.sin(now / 30 + t.wig) * 3;
+        ctx.beginPath(); ctx.moveTo(t.x - 3, t.y - wf); ctx.lineTo(t.x + 3, t.y - wf); ctx.stroke();
+      } else if (t.type === "rocket") {
+        const a = Math.atan2(t.ty - t.y, t.tx - t.x);
+        this._glow(ctx, theme, col, theme.effects.glow ? 12 : 0);
+        ctx.strokeStyle = rgba(col, 0.6); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(t.x - Math.cos(a) * 9, t.y - Math.sin(a) * 9); ctx.stroke();
+        ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(t.x, t.y, 2.6, 0, Math.PI * 2); ctx.fill();
+      } else if (t.type === "molotov") {
+        ctx.translate(t.x, t.y); ctx.rotate(t.spin || 0);
+        this._glow(ctx, theme, "#ff7a2a", theme.effects.glow ? 10 : 0);
+        ctx.fillStyle = rgba(col, 0.85); rr(ctx, -2.5, -4, 5, 9, 2); ctx.fill();
+        ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(0, -6, 2.2, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // shared rounded tile shell used across the dock
     _dockTile(ctx, theme, r, col, opts) {
       opts = opts || {};
@@ -296,11 +369,13 @@
       ctx.fillStyle = g; ctx.fillRect(0, top, w, h);
       ctx.strokeStyle = rgba(p.accent, 0.7); ctx.lineWidth = 2; if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = p.accent; }
       ctx.beginPath(); ctx.moveTo(0, top + 1); ctx.lineTo(w, top + 1); ctx.stroke(); ctx.shadowBlur = 0;
-      // captions
+      // captions (each sits just above its row)
       ctx.textBaseline = "alphabetic"; ctx.fillStyle = rgba(p.textDim, 0.85); ctx.font = "700 9px " + theme.fonts.ui; ctx.textAlign = "left";
-      if (d.weapons.length) ctx.fillText("ARSENAL", d.weapons[0].rect.x + 1, top + 13);
-      if (d.pickupSlots.length) ctx.fillText("INCOMING", d.pickupSlots[0].x + 1, top + 13);
-      if (d.streakSlots.length) ctx.fillText("KILLSTREAKS", d.streakSlots[0].x + 1, top + 13);
+      const cap = (txt, slot) => { if (slot) ctx.fillText(txt, slot.x + 1, slot.y - 4); };
+      if (d.weapons.length) cap("ARSENAL", d.weapons[0].rect);
+      cap("INCOMING", d.pickupSlots[0]);
+      cap("MILITIA", d.militiaSlots && d.militiaSlots[0]);
+      cap("KILLSTREAKS", d.streakSlots[0]);
 
       // ---- ARSENAL ----
       for (const c of d.weapons) {
@@ -328,12 +403,30 @@
         const r = pk.rect, col = pk.color, pulse = 0.65 + 0.35 * Math.sin(now / 140 + r.x);
         this._dockTile(ctx, theme, r, col, { lw: 2, glow: 8 + 8 * pulse, tint: rgba(col, 0.12 + 0.1 * pulse) });
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        if (pk.isMult) { ctx.fillStyle = "#fff7e0"; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; } ctx.font = "900 18px " + theme.fonts.ui; ctx.fillText("×" + pk.mult, r.x + r.w / 2, r.y + 20); ctx.shadowBlur = 0; }
-        else this.drawWeaponIcon(ctx, pk.weaponId, r.x + r.w / 2, r.y + 19, 18, col);
-        ctx.fillStyle = col; ctx.font = "700 8px " + theme.fonts.ui; ctx.fillText("GRAB", r.x + r.w / 2, r.y + r.h - 15);
-        const bw = r.w - 12, bx = r.x + 6, byb = r.y + r.h - 8;   // life-left bar
+        if (pk.isMult) { ctx.fillStyle = "#fff7e0"; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; } ctx.font = "900 18px " + theme.fonts.ui; ctx.fillText("×" + pk.mult, r.x + r.w / 2, r.y + 18); ctx.shadowBlur = 0; }
+        else if (pk.isTown) this.drawTownIcon(ctx, pk.townId, r.x + r.w / 2, r.y + 17, 17, col);
+        else this.drawWeaponIcon(ctx, pk.weaponId, r.x + r.w / 2, r.y + 17, 17, col);
+        if (pk.isTown) this._personBadge(ctx, r.x + r.w - 9, r.y + r.h - 18, 9, col);   // marks this pickup as FOR THE TOWNSFOLK
+        ctx.fillStyle = col; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(pk.isTown ? "TOWN" : "GRAB", r.x + r.w / 2, r.y + r.h - 14);
+        const bw = r.w - 12, bx = r.x + 6, byb = r.y + r.h - 7;   // life-left bar
         ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, 3);
         ctx.fillStyle = col; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, pk.frac)), 3);
+      }
+
+      // ---- MILITIA (townsfolk upgrades — display only; person-marked) ----
+      if (d.militiaSlots) {
+        for (const r of d.militiaSlots) { ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore(); }
+        for (const mu of (d.militia || [])) {
+          const r = mu.rect, col = mu.color;
+          this._dockTile(ctx, theme, r, col, { lw: 1.6, glow: 7, tint: rgba(col, 0.14) });
+          this.drawTownIcon(ctx, mu.id, r.x + r.w / 2, r.y + 16, 16, col);
+          this._personBadge(ctx, r.x + r.w - 9, r.y + 9, 8, col);
+          ctx.fillStyle = col; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(mu.short, r.x + r.w / 2, r.y + r.h - 13);
+          if (mu.lvl > 1) {   // enhancer level pips
+            const pips = Math.min(4, mu.lvl), pw = 5, tot = pips * pw + (pips - 1) * 2, bx = r.x + (r.w - tot) / 2, by = r.y + r.h - 5;
+            for (let k = 0; k < pips; k++) { ctx.fillStyle = col; ctx.fillRect(bx + k * (pw + 2), by, pw, 2); }
+          }
+        }
       }
 
       // ---- KILLSTREAKS (empty slots + meter on the next one, then earned streaks) ----
