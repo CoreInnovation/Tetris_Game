@@ -33,7 +33,7 @@
     // NAPALM — arcs in, splashes a lingering FIRE FIELD that incinerates anything passing through for a few seconds
     { id: "napalm", name: "NAPALM", short: "NAPM", kind: "arc", speed: 820, blast: 46, fire: true, fireR: 86, fireDur: 3.4, manual: true, reload: 520, mag: 4, cd: 1900, minWave: 6, sfx: "boom", color: "#ff6a2a" },
     { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 30, cluster: 8, minWave: 6, sfx: "launch", color: "#ff7a3a" },
-    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 430, blast: 24, pellets: 3, fuse: 3.2, weight: 1.9, minWave: 7, sfx: "launch", color: "#9aff6a" },
+    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 430, blast: 24, pellets: 4, pelletsMin: 2, pelletsMax: 6, fuse: 3.0, manual: true, reload: 900, mag: 5, cd: 1700, minWave: 7, sfx: "launch", color: "#9aff6a" },   // ~3x slower between shots; random swarm size (sometimes few, sometimes lots)
     { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 5, weight: 2.6, minWave: 8, sfx: "rail", color: "#b388ff" },
     { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 120, blackhole: true, weight: 1.6, minWave: 10, sfx: "cryo", color: "#c86bff" }
   ];
@@ -179,7 +179,7 @@
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0;
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
-      this.powerupT = rand(6000, 10000); this.ufoT = rand(11000, 17000);
+      this.powerupT = rand(2500, 4500); this.ufoT = rand(11000, 17000);
       this.shakeMag = 0; this.flash = 0; this.toasts = [];
       this.aim = { x: this._w / 2, y: this._h * 0.4 };
       this.particles.clear();
@@ -326,8 +326,8 @@
     }
     _layoutChips() { this._layoutDock(); }   // legacy alias (dev toggle / collect calls)
 
-    // Collect a weapon into the 4-slot inventory (drops the oldest spare past 4), then equip it.
-    _collectWeapon(id) {
+    // Collect a weapon into the 4-slot inventory (drops the oldest spare past 4), then equip it (unless keepActive).
+    _collectWeapon(id, keepActive) {
       if (!this.collected.includes(id)) {
         this.collected.push(id); this.unlocked[id] = true;
         while (this.collected.length > 4) {
@@ -336,7 +336,17 @@
           this.collected.splice(this.collected.indexOf(drop), 1); this.unlocked[drop] = false;
         }
       }
-      this.weapon = id; this._layoutChips();
+      if (!keepActive) this.weapon = id;
+      this._layoutChips();
+    }
+
+    // pick from a list, biased toward higher minWave so the BEST weapons/upgrades drop more as you progress
+    _weightedByWave(list) {
+      if (!list.length) return null;
+      let tot = 0; for (const w of list) tot += (w.minWave || 1);
+      let r = Math.random() * tot;
+      for (const w of list) { r -= (w.minWave || 1); if (r <= 0) return w; }
+      return list[list.length - 1];
     }
 
     _nextWave() {
@@ -404,7 +414,7 @@
         const elig = TOWN_UPGRADES.filter(u => (u.minWave || 1) <= this.wave);
         const fresh = elig.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
         const pool = fresh.length ? fresh : elig;
-        const u = pool[(Math.random() * pool.length) | 0];
+        const u = this._weightedByWave(pool);
         add({ town: u.id }, u.name, u.color);
       };
       // weighted category roll, adapting to what the wave has unlocked
@@ -420,7 +430,7 @@
       const locked = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave && !this.unlocked[w.id]);
       const eligible = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave);
       const pool = locked.length ? locked : eligible;
-      const w = pool[(Math.random() * pool.length) | 0];
+      const w = this._weightedByWave(pool);   // best weapons get likelier as waves climb
       add({ weapon: w.id }, w.name, w.color);
     }
 
@@ -440,7 +450,7 @@
       return true;
     }
 
-    _collectPowerup(pu) {
+    _collectPowerup(pu, auto) {
       if (pu.kind === "mult") {
         this.multishot = Math.max(this.multishot || 1, pu.mult); this.multishotT = MULT_DURATION;
         this.audio.play("extralife");
@@ -458,10 +468,10 @@
         return;
       }
       const w = WMAP[pu.weapon], wasNew = !this.collected.includes(pu.weapon);
-      this._collectWeapon(pu.weapon);   // adds to the 4-slot inventory + equips
+      this._collectWeapon(pu.weapon, auto);   // adds to the 4-slot inventory; manual grab also equips it (auto-grab keeps your current weapon)
       this.heat[pu.weapon] = 0; this.cdT[pu.weapon] = 0; this.reload[pu.weapon] = 0;
       this.audio.play("extralife");
-      this._toast((wasNew ? "GOT — " : "") + w.name + "!", true);
+      this._toast((auto ? "AUTO-GRAB — " : (wasNew ? "GOT — " : "")) + w.name + "!", true, w.color);
       if (this.theme.effects.particles) this.particles.emit({ x: pu.x, y: pu.y, count: 26,
         colors: [w.color || this.theme.palette.powerup, this.theme.palette.exhaust, "#ffffff"],
         speedMin: 50, speedMax: 280, gravity: 60, drag: 1, sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle", spin: 6 });
@@ -575,7 +585,7 @@
           p1x: (bx + tx) / 2 + side * bow, p1y: (by + ty) / 2 - bow * 0.7, t: 0, dur: Math.max(0.3, dist / w.speed) }));
         this._muzzle(bx, by, w);
       } else if (w.kind === "swarm") {
-        const n = w.pellets || 4;
+        const n = w.pelletsMin ? (w.pelletsMin + ((Math.random() * (w.pelletsMax - w.pelletsMin + 1)) | 0)) : (w.pellets || 4);   // random swarm size each shot
         for (let i = 0; i < n; i++) {
           const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.5;   // wider launch fan so the swarm covers more sky
           this.interceptors.push(this._proj(w, bx, by, tx, ty, { mode: "home",
@@ -732,7 +742,7 @@
     }
 
     _shake(m) { this.shakeMag = Math.max(this.shakeMag, m); }
-    _toast(text, big) { this.toasts.push({ text: text, born: this._now, life: 1400, big: !!big }); if (this.toasts.length > 4) this.toasts.shift(); }
+    _toast(text, big, color) { this.toasts.push({ text: text, born: this._now, life: 1400, big: !!big, color: color || null }); if (this.toasts.length > 4) this.toasts.shift(); }
     _gameOver() { if (this.state === "over") return; this.state = "over"; this.audio.stopMusic(); this.shell.requestGameOver({ score: this.score }); }
 
     // ---------------- update ----------------
@@ -762,7 +772,7 @@
       this.aim.y = Math.max(0, Math.min(this.groundY - 4, this.aim.y));
 
       if (this.pending > 0) { this.spawnT -= dt; if (this.spawnT <= 0) { this._spawnEnemy(); this.pending--; this.spawnT = this.spawnGap * rand(0.6, 1.4); } }
-      this.powerupT -= dt; if (this.powerupT <= 0 && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(16000, 28000); }
+      this.powerupT -= dt; if (this.powerupT <= 0 && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(7000, 12000); }
       if (!this.betweenWaves && this.multishotT > 0) { this.multishotT -= dt; if (this.multishotT <= 0) { this.multishot = 1; this.multishotT = 0; this._toast("MULTI-FIRE OFF"); } }   // don't burn powerup time during the wave breather
       this.ufoT -= dt; if (this.ufoT <= 0 && this.wave >= 2 && this.ufos.length < 1) { this._spawnUfo(); this.ufoT = rand(14000, 24000); }
 
@@ -794,7 +804,7 @@
       }
 
       // powerups wait in the dock's INCOMING slots, ticking down until grabbed (then they quietly expire)
-      if (!this.betweenWaves) for (let i = this.powerups.length - 1; i >= 0; i--) { const pu = this.powerups[i]; pu.t += dt; if (pu.t >= pu.life) { this.powerups.splice(i, 1); this.audio.play("pill"); } }
+      if (!this.betweenWaves) for (let i = this.powerups.length - 1; i >= 0; i--) { const pu = this.powerups[i]; pu.t += dt; if (pu.t >= pu.life) { const r = this.pickupSlots[i]; if (r) { pu.x = r.x + r.w / 2; pu.y = r.y + r.h / 2; } this.powerups.splice(i, 1); this._collectPowerup(pu, true); } }   // never waste a drop: if you don't grab it in time, the crew auto-collects it
 
       // black holes: pull enemies/ufos in, then implode
       for (let i = this.blackholes.length - 1; i >= 0; i--) {
@@ -1124,8 +1134,9 @@
         const alpha = pr < 0.15 ? pr / 0.15 : (1 - (pr - 0.15) / 0.85);
         ctx.globalAlpha = Math.max(0, alpha);
         ctx.font = "800 " + (t.big ? 28 : 18) + "px " + th.fonts.ui;
-        if (th.effects.glow) { ctx.shadowBlur = 14; ctx.shadowColor = th.palette.accent; }
-        ctx.fillStyle = th.palette.accent;
+        const tc = t.color || th.palette.accent;
+        if (th.effects.glow) { ctx.shadowBlur = 14; ctx.shadowColor = tc; }
+        ctx.fillStyle = tc;
         ctx.fillText(t.text, this._w / 2, this._h * 0.34 - pr * 20 + i * 30);
       }
       ctx.restore();
