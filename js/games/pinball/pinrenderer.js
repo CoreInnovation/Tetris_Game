@@ -44,11 +44,26 @@
       ctx.restore();
     }
 
+    // faint inlane/outlane floor lights + labels — the "channels behind the flippers"
+    drawLanes(ctx, theme, lanes) {
+      const p = theme.palette;
+      ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      for (const l of lanes) {
+        const col = l.lit ? p.rollOn : (p.rollOffc || p.lane);
+        ctx.fillStyle = rgba(col, l.lit ? 0.22 : 0.12);
+        ctx.fillRect(l.x, l.y, l.w, l.h);
+        ctx.strokeStyle = rgba(col, l.lit ? 0.8 : 0.3); ctx.lineWidth = 1.5; ctx.strokeRect(l.x, l.y, l.w, l.h);
+        ctx.fillStyle = rgba(col, l.lit ? 0.95 : 0.4); ctx.font = "700 9px " + theme.fonts.ui;
+        ctx.fillText(l.kind === "in" ? "IN" : "OUT", l.x + l.w / 2, l.y + 11);
+      }
+      ctx.restore();
+    }
+
     drawSling(ctx, theme, s, now) {
       const p = theme.palette, hot = s.hit > 0;
       ctx.save();
       this._glow(ctx, theme, p.sling, theme.effects.glow ? 12 : 0);
-      ctx.strokeStyle = hot ? p.bumperHit : p.sling; ctx.lineWidth = 7; ctx.lineCap = "round";
+      ctx.strokeStyle = hot ? p.bumperHit : p.sling; ctx.lineWidth = hot ? 9 : 7; ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
       ctx.restore();
     }
@@ -59,7 +74,117 @@
       ctx.save();
       this._glow(ctx, theme, col, theme.effects.glow ? 8 : 0);
       ctx.strokeStyle = col; ctx.lineWidth = 6; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(t.x, t.y1); ctx.lineTo(t.x, t.y2); ctx.stroke();
+      ctx.beginPath();
+      if (t.vert) { ctx.moveTo(t.x - 11, t.y1); ctx.lineTo(t.x + 11, t.y1); }
+      else { ctx.moveTo(t.x, t.y1); ctx.lineTo(t.x, t.y2); }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    drawStandup(ctx, theme, s) {
+      const p = theme.palette, col = s.hit > 0 ? p.bumperHit : (s.lit ? p.standupLit : p.standup);
+      ctx.save();
+      this._glow(ctx, theme, col, theme.effects.glow ? 10 : 0);
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.2832); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = rgba("#000", 0.35); ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 0.4, 0, 6.2832); ctx.fill();
+      ctx.restore();
+    }
+
+    drawSpinner(ctx, theme, s, now) {
+      const p = theme.palette;
+      ctx.save();
+      // posts top & bottom
+      this._glow(ctx, theme, p.post, theme.effects.glow ? 6 : 0);
+      ctx.fillStyle = p.post; ctx.beginPath(); ctx.arc(s.x, s.y1, 3, 0, 6.2832); ctx.arc(s.x, s.y2, 3, 0, 6.2832); ctx.fill();
+      // spinning blade (width oscillates with spin angle to fake rotation)
+      const ww = Math.abs(Math.cos(s.ang)) * 12 + 1.5, hot = s.hit > 0;
+      this._glow(ctx, theme, p.spinner, theme.effects.glow ? 12 : 0);
+      ctx.fillStyle = hot ? p.bumperHit : p.spinner;
+      ctx.fillRect(s.x - ww / 2, s.y1 + 2, ww, (s.y2 - s.y1) - 4);
+      ctx.restore();
+    }
+
+    drawTunnel(ctx, theme, tn, now) {
+      const p = theme.palette;
+      // entrance portal (swirl)
+      ctx.save(); ctx.translate(tn.ex, tn.ey);
+      this._glow(ctx, theme, p.tunnel, theme.effects.glow ? 18 : 0);
+      const g = ctx.createRadialGradient(0, 0, 1, 0, 0, tn.r);
+      g.addColorStop(0, "#000"); g.addColorStop(0.55, rgba(p.tunnel, 0.85)); g.addColorStop(1, rgba(p.tunnel, 0.15 + tn.glow * 0.5));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, tn.r, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = p.tunnel; ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) { ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(0, 0, tn.r * (0.45 + i * 0.22), now / 400 + i, now / 400 + i + 4.4); ctx.stroke(); ctx.rotate(0.5); }
+      ctx.restore();
+      // exit portal
+      ctx.save(); ctx.translate(tn.outx, tn.outy);
+      this._glow(ctx, theme, p.tunnelExit, theme.effects.glow ? 14 : 0);
+      ctx.strokeStyle = rgba(p.tunnelExit, 0.6 + tn.glow * 0.4); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(0, 0, 12, 0, 6.2832); ctx.stroke();
+      ctx.fillStyle = rgba(p.tunnelExit, 0.18 + tn.glow * 0.5); ctx.beginPath(); ctx.arc(0, 0, 12, 0, 6.2832); ctx.fill();
+      ctx.restore();
+    }
+
+    drawLock(ctx, theme, lk, now) {
+      const p = theme.palette, on = lk.lit || lk.glow > 0;
+      ctx.save(); ctx.translate(lk.x, lk.y);
+      this._glow(ctx, theme, p.lock, theme.effects.glow ? (on ? 18 : 8) : 0);
+      ctx.fillStyle = "#05080c"; ctx.beginPath(); ctx.arc(0, 0, lk.r, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = on ? p.lock : rgba(p.lock, 0.5); ctx.lineWidth = on ? 3 : 2;
+      ctx.beginPath(); ctx.arc(0, 0, lk.r, 0, 6.2832); ctx.stroke();
+      // lock pips
+      ctx.fillStyle = p.lock; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.shadowBlur = 0;
+      ctx.font = "800 11px " + theme.fonts.ui; ctx.fillText(on ? "LOCK" : (lk.count || ""), 0, 0);
+      ctx.restore();
+    }
+
+    drawMagnet(ctx, theme, mg, now) {
+      if (mg.active <= 0) return;
+      const p = theme.palette;
+      ctx.save(); ctx.translate(mg.x, mg.y);
+      ctx.globalCompositeOperation = "lighter";
+      const pulse = 0.5 + 0.5 * Math.sin(now / 120);
+      const g = ctx.createRadialGradient(0, 0, 4, 0, 0, mg.r);
+      g.addColorStop(0, rgba(p.magnet, 0.16 + pulse * 0.14)); g.addColorStop(1, rgba(p.magnet, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, mg.r, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = rgba(p.magnet, 0.4); ctx.lineWidth = 1.5;
+      for (let i = 0; i < 3; i++) { const rr = mg.r * (0.4 + 0.2 * i) * (0.85 + 0.15 * Math.sin(now / 200 + i)); ctx.beginPath(); ctx.arc(0, 0, rr, 0, 6.2832); ctx.stroke(); }
+      ctx.restore();
+    }
+
+    drawKickback(ctx, theme, kb, now) {
+      const p = theme.palette, on = kb.charged;
+      ctx.save(); ctx.translate(kb.x, kb.y);
+      this._glow(ctx, theme, on ? p.kick : p.textDim, theme.effects.glow ? (on ? 12 : 4) : 0);
+      ctx.fillStyle = on ? p.kick : rgba(p.textDim, 0.5);
+      // up-arrow
+      ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(6, 2); ctx.lineTo(2, 2); ctx.lineTo(2, 8); ctx.lineTo(-2, 8); ctx.lineTo(-2, 2); ctx.lineTo(-6, 2); ctx.closePath(); ctx.fill();
+      if (on && kb.glow > 0) { ctx.globalAlpha = kb.glow; ctx.strokeStyle = p.kick; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 14, 0, 6.2832); ctx.stroke(); }
+      ctx.restore();
+    }
+
+    drawRamp(ctx, theme, path, entry, now) {
+      const p = theme.palette;
+      ctx.save();
+      // habitrail: two faint guide rails along the path
+      ctx.strokeStyle = rgba(p.ramp, 0.28); ctx.lineWidth = 10; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y); for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y); ctx.stroke();
+      ctx.strokeStyle = rgba(p.ramp, 0.5); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y); for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y); ctx.stroke();
+      // entrance scoop
+      this._glow(ctx, theme, p.ramp, theme.effects.glow ? (10 + entry.glow * 16) : 0);
+      ctx.strokeStyle = rgba(p.ramp, 0.7 + entry.glow * 0.3); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(entry.x, entry.y, entry.r, Math.PI * 0.6, Math.PI * 2.0); ctx.stroke();
+      ctx.restore();
+    }
+
+    drawRollover(ctx, theme, w, now) {
+      const p = theme.palette, on = w.lit;
+      ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      this._glow(ctx, theme, on ? p.rollOn : p.textDim, theme.effects.glow ? (on ? 12 : 0) : 0);
+      ctx.strokeStyle = on ? p.rollOn : rgba(p.textDim, 0.6); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(w.x, w.y, 11, 7, 0, 0, 6.2832); ctx.stroke();
+      ctx.fillStyle = on ? p.rollOn : rgba(p.textDim, 0.7); ctx.font = "800 11px " + theme.fonts.ui; ctx.shadowBlur = 0;
+      ctx.fillText(w.ch, w.x, w.y + 0.5);
       ctx.restore();
     }
 
@@ -79,7 +204,7 @@
       const p = theme.palette, hot = rc.lit > 0, accent = p.accent;
       ctx.save();
       const n = 16, rr = rc.r + 10;
-      for (let i = 0; i < n; i++) {   // ring of orbiting lights
+      for (let i = 0; i < n; i++) {
         const a = (i / n) * 6.2832 + now / 1500;
         const lx = rc.x + Math.cos(a) * rr, ly = rc.y + Math.sin(a) * rr;
         const on = ((i + Math.floor(now / 110)) % 3 === 0);
@@ -100,9 +225,12 @@
       const tx = f.px + Math.cos(f.angle) * f.len, ty = f.py + Math.sin(f.angle) * f.len;
       ctx.save();
       this._glow(ctx, theme, p.flipper, theme.effects.glow ? 12 : 0);
-      ctx.strokeStyle = p.flipper; ctx.lineWidth = f.thick * 2; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(f.px, f.py); ctx.lineTo(tx, ty); ctx.stroke();
-      ctx.fillStyle = p.flipper; ctx.beginPath(); ctx.arc(f.px, f.py, f.thick * 1.1, 0, 6.2832); ctx.fill();
+      // tapered bat: thick at pivot, thinner at tip
+      ctx.strokeStyle = p.flipper; ctx.lineCap = "round";
+      ctx.lineWidth = f.thick * 2.2; ctx.beginPath(); ctx.moveTo(f.px, f.py); ctx.lineTo(f.px + (tx - f.px) * 0.6, f.py + (ty - f.py) * 0.6); ctx.stroke();
+      ctx.lineWidth = f.thick * 1.4; ctx.beginPath(); ctx.moveTo(f.px + (tx - f.px) * 0.55, f.py + (ty - f.py) * 0.55); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.fillStyle = p.flipper; ctx.beginPath(); ctx.arc(f.px, f.py, f.thick * 1.2, 0, 6.2832); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = rgba("#000", 0.3); ctx.beginPath(); ctx.arc(f.px, f.py, f.thick * 0.5, 0, 6.2832); ctx.fill();
       ctx.restore();
     }
 
@@ -113,13 +241,15 @@
       ctx.strokeStyle = p.plunger; ctx.lineWidth = 10; ctx.lineCap = "round";
       this._glow(ctx, theme, p.plunger, theme.effects.glow ? 8 : 0);
       ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + 22); ctx.stroke();
+      if (charge > 0) { ctx.shadowBlur = 0; ctx.strokeStyle = rgba(charge > 0.8 ? p.danger : p.plunger, 0.9); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - 9, 612); ctx.lineTo(x - 9, 612 - charge * 70); ctx.stroke(); }
       ctx.restore();
     }
 
     drawBall(ctx, theme, ball, trail) {
       const p = theme.palette;
       ctx.save();
-      if (theme.effects.trail && trail) {
+      if (ball.mode === "hold") { ctx.globalAlpha = 0.9; }
+      if (theme.effects.trail && trail && ball.mode !== "hold") {
         for (let i = 0; i < trail.length; i++) { const t = trail[i], a = (i / trail.length) * 0.4; ctx.globalAlpha = a; ctx.fillStyle = p.ball; ctx.beginPath(); ctx.arc(t.x, t.y, ball.r * (0.4 + 0.5 * (i / trail.length)), 0, 6.2832); ctx.fill(); }
         ctx.globalAlpha = 1;
       }
@@ -139,10 +269,12 @@
       ctx.fillText(String(data.score).toLocaleString(), 18, 14);
       ctx.shadowBlur = 0; ctx.font = "600 13px " + theme.fonts.ui; ctx.fillStyle = p.textDim; ctx.textAlign = "right";
       ctx.fillText("BALL  " + "●".repeat(Math.max(0, data.balls)), this.w - 18, 18);
-      // rank + playfield multiplier under the score
       ctx.shadowBlur = 0; ctx.textAlign = "left"; ctx.font = "700 12px " + theme.fonts.ui; ctx.fillStyle = p.textDim;
-      ctx.fillText("RANK  " + (data.rank || "CADET") + (data.mult > 1 ? "    ×" + data.mult : ""), 18, 44);
-      // active mission banner + countdown (or multiball flash)
+      let line = "RANK " + (data.rank || "CADET");
+      if (data.mult > 1) line += "   ×" + data.mult;
+      if (data.bonusX > 1) line += "   BONUS×" + data.bonusX;
+      if (data.lock > 0) line += "   LOCK " + data.lock + "/3";
+      ctx.fillText(line, 18, 44);
       if (data.mission) {
         const m = data.mission, cx = this.w / 2;
         ctx.textAlign = "center"; ctx.fillStyle = p.accent; ctx.font = "800 13px " + theme.fonts.ui;
@@ -159,7 +291,7 @@
       ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
       this._glow(ctx, theme, p.accent, theme.effects.glow ? 14 : 0);
       ctx.fillStyle = p.text; ctx.font = "800 20px " + theme.fonts.ui;
-      ctx.fillText(msg, this.w / 2, this.h * 0.78);
+      ctx.fillText(msg, this.w / 2, this.h * 0.8);
       ctx.restore();
     }
 
