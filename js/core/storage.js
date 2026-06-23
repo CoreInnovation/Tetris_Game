@@ -47,14 +47,19 @@
       }
     }
 
-    /** Convenience for per-game high scores. */
-    getHighScore(gameId) { return this.get("highscore:" + gameId, 0); }
+    // High scores are kept SEPARATELY per device ("touch" vs "desktop") — touch and
+    // keyboard/mouse play very differently. Desktop uses the legacy key (no suffix) so
+    // existing records are preserved as desktop scores; touch gets its own ":touch" key.
+    _hsKey(gameId, device) { return "highscore:" + gameId + (device === "touch" ? ":touch" : ""); }
 
-    /** Stores only if higher. Returns true if it was a new record. */
-    setHighScore(gameId, score) {
-      const best = this.getHighScore(gameId);
+    /** Convenience for per-game, per-device high scores. */
+    getHighScore(gameId, device) { return this.get(this._hsKey(gameId, device), 0); }
+
+    /** Stores only if higher (for that device). Returns true if it was a new record. */
+    setHighScore(gameId, score, device) {
+      const best = this.getHighScore(gameId, device);
       if (score > best) {
-        this.set("highscore:" + gameId, score);
+        this.set(this._hsKey(gameId, device), score);
         return true;
       }
       return false;

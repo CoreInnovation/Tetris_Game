@@ -125,6 +125,10 @@
       } catch (e) { return false; }
     }
 
+    // Which device bucket high scores are tracked under (touch and desktop are separate games).
+    _device() { return this.isTouch ? "touch" : "desktop"; }
+    _deviceLabel() { return this.isTouch ? "MOBILE" : "DESKTOP"; }
+
     // ---------------- Menu ----------------
     _buildMenu() {
       const grid = this.refs.gameGrid;
@@ -133,12 +137,12 @@
         const card = document.createElement("button");
         card.className = "game-card";
         card.style.setProperty("--card-accent", mod.accent || "#5ad1ff");
-        const best = this.storage.getHighScore(mod.id);
+        const best = this.storage.getHighScore(mod.id, this._device());
         card.innerHTML =
           '<div class="gc-icon">' + (mod.icon || "🎮") + "</div>" +
           '<div class="gc-name">' + esc(mod.name) + "</div>" +
           '<div class="gc-tag">' + esc(mod.tagline || "") + "</div>" +
-          '<div class="gc-best">BEST&nbsp;&nbsp;' + best.toLocaleString() + "</div>" +
+          '<div class="gc-best">BEST · ' + this._deviceLabel() + "&nbsp;&nbsp;" + best.toLocaleString() + "</div>" +
           '<span class="gc-share" role="button" tabindex="0" aria-label="Copy share link" title="Copy link to this game">🔗</span>' +
           '<span class="gc-toast" aria-hidden="true">Link copied!</span>';
         card.addEventListener("click", () => { this.audio.play("select"); this.mountGame(mod); });
@@ -281,10 +285,11 @@
       this._paused = true;
       if (this._game && this._game.pause) this._game.pause();
       const score = info.score || 0;
-      const isNew = this.storage.setHighScore(this._module.id, score);
-      const best = this.storage.getHighScore(this._module.id);
+      const isNew = this.storage.setHighScore(this._module.id, score, this._device());
+      const best = this.storage.getHighScore(this._module.id, this._device());
       this.refs.goScore.textContent = score.toLocaleString();
       this.refs.goBest.textContent = best.toLocaleString();
+      if (this.refs.goBestLabel) this.refs.goBestLabel.textContent = "Best (" + (this.isTouch ? "Mobile" : "Desktop") + ")";
       this.refs.goNew.classList.toggle("hidden", !isNew);
       this.audio.play("gameover");
       this._hide(this.refs.pauseOverlay);   // don't leave a pause overlay stacked under game-over

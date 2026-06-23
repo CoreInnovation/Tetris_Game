@@ -479,7 +479,7 @@
       const ctx = this.ctx2d, R = this.renderer, th = this.theme;
       R.drawBackground(ctx, th, now);
       let sx = 0, sy = 0;
-      if (this.shakeMag > 0.1) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
+      if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }   // no shake while paused
       ctx.save(); ctx.translate(sx, sy); ctx.scale(this.zoom, this.zoom);   // camera zoom (world space)
       for (const bh of this.blackholes) R.drawBlackhole(ctx, th, bh);
       for (const a of this.asteroids) R.drawAsteroid(ctx, a, th);

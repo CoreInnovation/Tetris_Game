@@ -574,7 +574,7 @@
       R.drawBackground(ctx, th, w, h, now);
 
       let sx = 0, sy = 0;
-      if (this.shakeMag > 0.1) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
+      if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }   // no shake while paused
       ctx.save();
       ctx.translate(sx, sy);
 

@@ -847,7 +847,7 @@
       const oy = Math.round(this._cssH / 2 - (this.camX + this.camY) * KY);
       if (this._lastOx != null) this.particles.shiftAll(ox - this._lastOx, oy - this._lastOy);   // keep particles pinned to the world as the camera scrolls
       this._lastOx = ox; this._lastOy = oy;
-      let sx = 0, sy = 0; if (this.shakeMag > 0.1) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
+      let sx = 0, sy = 0; if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }   // no shake while paused
       R.setCamera(ox + sx, oy + sy);
       R.drawBackground(ctx, th);
       R.drawGround(ctx, th, now, this.camX, this.camY, this.decals);

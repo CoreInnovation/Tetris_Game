@@ -30,6 +30,7 @@
       touchControls: $("touchControls"),
       goScore: $("goScore"),
       goBest: $("goBest"),
+      goBestLabel: $("goBestLabel"),
       goNew: $("goNew")
     });
     // Handy for debugging from the console.
