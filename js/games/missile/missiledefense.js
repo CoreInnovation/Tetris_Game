@@ -176,7 +176,7 @@
       // ---- MILITIA (townsfolk) upgrades — tracked entirely separate from weapons/killstreaks ----
       this.townShots = []; this.townUpgrades = []; this.townUnlocked = {}; this.townRangeLvl = 0; this.townMultiLvl = 0; this.townFireT = 1400; this.militiaSlots = [];
       if (this.dev) { this.townUpgrades = ["buckshot", "rockets", "molotov", "bees"]; this.townRangeLvl = 1; this.townMultiLvl = 1; TOWN_UPGRADES.forEach(u => { this.townUnlocked[u.id] = true; }); }
-      this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0;
+      this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0; this.armyCdT = 0;
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(2500, 4500); this.ufoT = rand(11000, 17000);
@@ -483,9 +483,20 @@
       for (const m of this.enemies) { const d = Math.abs(m.x - cx); if (d < bd) { bd = d; tx = m.x; ty = m.y; } }
       const px = cx + rand(-22, 22), py = this.groundY - 9;
       const dx = (tx - px) + rand(-26, 26), dy = (ty - py), d = Math.hypot(dx, dy) || 1, sp = rand(440, 600);
-      this.tracers.push({ x: px, y: py, vx: dx / d * sp, vy: dy / d * sp, life: rand(0.32, 0.6) });
+      this.tracers.push({ x: px, y: py, vx: dx / d * sp, vy: dy / d * sp, life: rand(0.32, 0.6), color: "#ffe066" });
       if (this.theme.effects.particles && Math.random() < 0.5) this.particles.emit({ x: px, y: py - 2, count: 2, colors: ["#ffe08a", "#ffffff"],
         speedMin: 8, speedMax: 46, gravity: 0, drag: 2.2, sizeMin: 1, sizeMax: 2, lifeMin: 0.08, lifeMax: 0.22, glow: this.theme.effects.glow, shape: "circle" });
+    }
+
+    // a soldier stationed at a firing base sends an AIMED tracer at the nearest threat (trained — straighter & faster than civvies)
+    _spawnSoldierTracer(bx) {
+      let tx = bx, ty = 60, bd = 1e9;
+      for (const m of this.enemies) { const d = Math.abs(m.x - bx); if (d < bd) { bd = d; tx = m.x; ty = m.y; } }
+      const px = bx + rand(-20, 20), py = this.groundY - 12;
+      const dx = (tx - px) + rand(-16, 16), dy = (ty - py), d = Math.hypot(dx, dy) || 1, sp = rand(640, 800);
+      this.tracers.push({ x: px, y: py, vx: dx / d * sp, vy: dy / d * sp, life: rand(0.34, 0.62), army: true, color: "#a8ff7a" });
+      if (this.theme.effects.particles && Math.random() < 0.6) this.particles.emit({ x: px, y: py - 2, count: 2, colors: ["#d6ffb0", "#ffffff"],
+        speedMin: 10, speedMax: 60, gravity: 0, drag: 2.2, sizeMin: 1, sizeMax: 2, lifeMin: 0.08, lifeMax: 0.2, glow: this.theme.effects.glow, shape: "circle" });
     }
 
     // ---------------- MILITIA: the townsfolk's upgraded little guns ----------------
@@ -988,14 +999,18 @@
         c.panic = this.enemies.some(m => Math.hypot(m.x - c.x, m.y - this.groundY) < PANIC_DIST);
         if (c.panic) { anyPanic = true; if (this.enemies.length && this.tracers.length < 64 && Math.random() < dt / 150) this._spawnTracer(c.x); }   // panicking folks plink away (harmless)
       }
+      // ARMY at the firing bases: stationed soldiers lay down covering fire whenever threats are in the sky
+      if (this.enemies.length) for (const b of this.batteries) { if (b.alive && this.tracers.length < 90 && Math.random() < dt / 150) this._spawnSoldierTracer(b.x); }
       if (this.peopleCdT > 0) this.peopleCdT -= dt;
+      if (this.armyCdT > 0) this.armyCdT -= dt;
       for (let i = this.tracers.length - 1; i >= 0; i--) {
         const tr = this.tracers[i]; tr.x += tr.vx * s; tr.y += tr.vy * s; tr.life -= s;
         let hit = false;
-        if (this.peopleCdT <= 0) {   // limited firepower: the crowd can only pick off ~1 enemy every couple seconds (a barrage overwhelms them)
+        const ready = tr.army ? (this.armyCdT <= 0) : (this.peopleCdT <= 0);   // army + crowd each have their own limited-but-separate firepower
+        if (ready) {
           for (let k = this.enemies.length - 1; k >= 0; k--) {
             const m = this.enemies[k];
-            if (Math.hypot(m.x - tr.x, m.y - tr.y) < 16) { this.enemies.splice(k, 1); this.score += 5; this._addKill(); this._burst(m.x, m.y, "#ffe066", 9); this.peopleCdT = rand(1700, 2600); hit = true; break; }
+            if (Math.hypot(m.x - tr.x, m.y - tr.y) < 16) { this.enemies.splice(k, 1); this.score += tr.army ? 15 : 5; this._addKill(); this._burst(m.x, m.y, tr.color || "#ffe066", 9); if (tr.army) this.armyCdT = rand(1300, 1900); else this.peopleCdT = rand(1700, 2600); hit = true; break; }
           }
         }
         if (hit || tr.life <= 0 || tr.y < -12) this.tracers.splice(i, 1);
@@ -1073,7 +1088,7 @@
       if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }   // freeze the shake while paused (no jank)
       ctx.save(); ctx.translate(sx, sy);
       for (const c of this.cities) { R.drawCity(ctx, th, c.x, c.alive); if (c.alive) R.drawPeople(ctx, th, c.x, c.panic, now); }
-      for (const b of this.batteries) R.drawBattery(ctx, th, b.x, b.alive);
+      for (const b of this.batteries) { R.drawBattery(ctx, th, b.x, b.alive); if (b.alive) R.drawSoldiers(ctx, th, b.x, now); }
       R.drawTracers(ctx, th, this.tracers);
       for (const bh of this.blackholes) R.drawBlackhole(ctx, th, bh);
       for (const m of this.enemies) R.drawEnemy(ctx, th, m);

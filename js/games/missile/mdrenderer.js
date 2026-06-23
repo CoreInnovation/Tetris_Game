@@ -56,6 +56,35 @@
       ctx.restore();
     }
 
+    // a small squad of helmeted soldiers manning a firing base, rifles aimed at the sky
+    drawSoldiers(ctx, theme, x, now) {
+      const y = this.groundY, col = "#a7c08a", metal = "#5f6e48";
+      ctx.save(); ctx.lineCap = "round";
+      const spots = [-23, 23, 0];   // flanking the launcher + one on top
+      for (let k = 0; k < spots.length; k++) {
+        const side = k === 1 ? 1 : -1, sx = x + spots[k], top = (k === 2);
+        const yy = (top ? y - 16 : y) - 2 - Math.abs(Math.sin(now / 480 + k)) * 0.6;   // top soldier stands on the launcher
+        // torso + legs
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.8;
+        ctx.beginPath(); ctx.moveTo(sx, yy - 8); ctx.lineTo(sx, yy - 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx, yy - 2); ctx.lineTo(sx - 2.3, yy + 2); ctx.moveTo(sx, yy - 2); ctx.lineTo(sx + 2.3, yy + 2); ctx.stroke();
+        // head + helmet
+        ctx.beginPath(); ctx.arc(sx, yy - 10, 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = metal; ctx.lineWidth = 2.1; ctx.beginPath(); ctx.arc(sx, yy - 11, 3, Math.PI, 0); ctx.stroke();
+        ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(sx - 3.6, yy - 11); ctx.lineTo(sx + 3.6, yy - 11); ctx.stroke();
+        // rifle up-and-out toward the sky
+        ctx.strokeStyle = metal; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(sx, yy - 7); ctx.lineTo(sx + side * 5.5, yy - 14); ctx.stroke();
+        // muzzle-flash flicker (staggered per soldier)
+        if (Math.floor(now / 120 + k * 2) % 5 === 0) {
+          this._glow(ctx, theme, "#fff1b0", theme.effects.glow ? 6 : 0);
+          ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(sx + side * 6.5, yy - 15, 1.8, 0, Math.PI * 2); ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+      ctx.restore();
+    }
+
     drawEnemy(ctx, theme, m) {
       const p = theme.palette, TAU = Math.PI * 2, slowed = m.slow > 0, def = m.def || {}, kind = m.kind || "basic";
       const col = slowed ? "#bfeaff" : (def.color || p.enemy);
@@ -552,10 +581,11 @@
     drawTracers(ctx, theme, tracers) {
       if (!tracers || !tracers.length) return;
       ctx.save();
-      this._glow(ctx, theme, "#ffd24a", theme.effects.glow ? 6 : 0);
-      ctx.strokeStyle = "#ffe066"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
+      ctx.lineWidth = 1.6; ctx.lineCap = "round";
       for (const t of tracers) {
-        const sp = Math.hypot(t.vx, t.vy) || 1, len = 8;
+        const col = t.color || "#ffe066", sp = Math.hypot(t.vx, t.vy) || 1, len = t.army ? 10 : 8;
+        if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = col; }
+        ctx.strokeStyle = col;
         ctx.globalAlpha = Math.max(0.2, Math.min(1, t.life * 2.6));
         ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(t.x - t.vx / sp * len, t.y - t.vy / sp * len); ctx.stroke();
       }
