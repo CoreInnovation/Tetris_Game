@@ -250,25 +250,111 @@
       ctx.restore();
     }
 
-    // killstreak stack on the right edge; returns clickable rects. progress 0..1 = meter to next streak.
-    // sel >= 0 = the chip being aimed at while holding right-click (release to fire it).
-    drawStreakPanel(ctx, theme, list, prog, sel) {
-      const p = theme.palette, sz = 46, x = this.w - sz - 12, gap = 8, y0 = 150, rects = [];
-      ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillStyle = p.textDim; ctx.font = "700 9px " + theme.fonts.ui; ctx.fillText("STREAKS", x + sz / 2, y0 - 16);
-      ctx.fillStyle = rgba("#000", 0.4); ctx.fillRect(x, y0 - 9, sz, 4);
-      ctx.fillStyle = p.accent; if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = p.accent; } ctx.fillRect(x, y0 - 9, sz * Math.max(0, Math.min(1, prog)), 4); ctx.shadowBlur = 0;
-      for (let i = 0; i < list.length; i++) {
-        const s = list[i], yy = y0 + i * (sz + gap), picked = (i === sel); rects.push({ x: x, y: yy, w: sz, h: sz });
-        ctx.fillStyle = rgba(s.color, picked ? 0.40 : 0.18); ctx.fillRect(x, yy, sz, sz);
-        ctx.strokeStyle = picked ? "#ffffff" : s.color; ctx.lineWidth = picked ? 3.5 : 2; if (theme.effects.glow) { ctx.shadowBlur = picked ? 18 : 10; ctx.shadowColor = s.color; } ctx.strokeRect(x, yy, sz, sz); ctx.shadowBlur = 0;
-        ctx.fillStyle = "#fff"; ctx.font = "800 20px " + theme.fonts.ui; ctx.fillText(s.icon, x + sz / 2, yy + sz / 2 - 4);
-        ctx.fillStyle = picked ? "#fff" : s.color; ctx.font = "700 8px " + theme.fonts.ui; ctx.fillText(s.name.split(" ")[0], x + sz / 2, yy + sz - 8);
-        if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 9px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.fillText("▶", x - 4, yy + sz / 2); ctx.textAlign = "center"; }
+    // crisp vector glyph per killstreak (so each is instantly readable in the dock)
+    drawStreakIcon(ctx, id, cx, cy, s, color) {
+      const r = s * 0.5, TAU = Math.PI * 2;
+      ctx.save(); ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.4, s * 0.1); ctx.lineCap = "round"; ctx.lineJoin = "round";
+      if (id === "nuke") {   // radiation trefoil
+        for (let k = 0; k < 3; k++) { const a = -Math.PI / 2 + k * TAU / 3; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a - 0.52, a + 0.52); ctx.closePath(); ctx.fill(); }
+        ctx.fillStyle = "#0a0a0a"; ctx.beginPath(); ctx.arc(cx, cy, r * 0.28, 0, TAU); ctx.fill();
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, r * 0.16, 0, TAU); ctx.fill();
+      } else if (id === "drone") {   // top-down strike aircraft
+        ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 0.16, cy + r * 0.7); ctx.lineTo(cx - r * 0.16, cy + r * 0.7); ctx.closePath(); ctx.fill();   // fuselage
+        ctx.beginPath(); ctx.moveTo(cx - r, cy + r * 0.1); ctx.lineTo(cx + r, cy + r * 0.1); ctx.lineTo(cx + r * 0.16, cy - r * 0.15); ctx.lineTo(cx - r * 0.16, cy - r * 0.15); ctx.closePath(); ctx.fill();   // wing
+        ctx.beginPath(); ctx.moveTo(cx - r * 0.4, cy + r * 0.7); ctx.lineTo(cx + r * 0.4, cy + r * 0.7); ctx.lineTo(cx, cy + r * 0.5); ctx.closePath(); ctx.fill();   // tail
+      } else if (id === "meteor") {   // flaming comet
+        ctx.beginPath(); ctx.moveTo(cx + r * 0.9, cy - r * 0.9); ctx.lineTo(cx - r * 0.2, cy + r * 0.2); ctx.lineTo(cx + r * 0.2, cy - r * 0.2); ctx.closePath(); ctx.globalAlpha = 0.6; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(cx - r * 0.35, cy + r * 0.35, r * 0.42, 0, TAU); ctx.fill();
+      } else if (id === "volcano") {   // erupting mountain
+        ctx.beginPath(); ctx.moveTo(cx - r, cy + r * 0.8); ctx.lineTo(cx - r * 0.35, cy - r * 0.1); ctx.lineTo(cx + r * 0.35, cy - r * 0.1); ctx.lineTo(cx + r, cy + r * 0.8); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(cx, cy - r * 0.55, r * 0.22, 0, TAU); ctx.fill();
+        for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.arc(cx + k * r * 0.4, cy - r * (0.8 + Math.abs(k) * 0.1), r * 0.1, 0, TAU); ctx.fill(); }
       }
-      if (sel >= 0 && list.length) { ctx.fillStyle = p.text; ctx.font = "700 9px " + theme.fonts.ui; ctx.fillText("RELEASE", x + sz / 2, y0 + list.length * (sz + gap) + 4); }
       ctx.restore();
-      return rects;
+    }
+
+    // shared rounded tile shell used across the dock
+    _dockTile(ctx, theme, r, col, opts) {
+      opts = opts || {};
+      ctx.save();
+      ctx.globalAlpha = opts.dim ? 0.5 : 1;
+      ctx.fillStyle = opts.fill || "rgba(8,12,20,0.78)"; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.fill();
+      if (opts.tint) { ctx.fillStyle = opts.tint; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.fill(); }
+      ctx.lineWidth = opts.lw || 1.4; ctx.strokeStyle = col;
+      if (theme.effects.glow && opts.glow) { ctx.shadowBlur = opts.glow; ctx.shadowColor = col; }
+      rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke();
+      ctx.restore();
+    }
+
+    // the whole bottom CONTROL DOCK: panel + ARSENAL · INCOMING · KILLSTREAKS
+    drawDock(ctx, theme, d) {
+      const p = theme.palette, w = d.w, top = d.dockTop, h = d.dockH, now = d.now || 0;
+      ctx.save();
+      // panel background
+      const g = ctx.createLinearGradient(0, top, 0, top + h);
+      g.addColorStop(0, rgba("#0c1118", 0.96)); g.addColorStop(1, rgba("#05070c", 0.98));
+      ctx.fillStyle = g; ctx.fillRect(0, top, w, h);
+      ctx.strokeStyle = rgba(p.accent, 0.7); ctx.lineWidth = 2; if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = p.accent; }
+      ctx.beginPath(); ctx.moveTo(0, top + 1); ctx.lineTo(w, top + 1); ctx.stroke(); ctx.shadowBlur = 0;
+      // captions
+      ctx.textBaseline = "alphabetic"; ctx.fillStyle = rgba(p.textDim, 0.85); ctx.font = "700 9px " + theme.fonts.ui; ctx.textAlign = "left";
+      if (d.weapons.length) ctx.fillText("ARSENAL", d.weapons[0].rect.x + 1, top + 13);
+      if (d.pickupSlots.length) ctx.fillText("INCOMING", d.pickupSlots[0].x + 1, top + 13);
+      if (d.streakSlots.length) ctx.fillText("KILLSTREAKS", d.streakSlots[0].x + 1, top + 13);
+
+      // ---- ARSENAL ----
+      for (const c of d.weapons) {
+        const r = c.rect, col = c.color || p.interceptor;
+        const borderCol = c.cooling ? p.enemy : (c.active ? p.accent : rgba(p.textDim, 0.5));
+        this._dockTile(ctx, theme, r, borderCol, { dim: c.locked, lw: (c.active || c.cooling) ? 2.2 : 1.2,
+          glow: c.active ? 10 : 0, tint: c.cooling ? "rgba(255,72,72,0.16)" : (c.active ? rgba(p.accent, 0.08) : null) });
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        if (c.locked) { ctx.fillStyle = p.textDim; ctx.font = "700 16px " + theme.fonts.ui; ctx.fillText("?", r.x + r.w / 2, r.y + r.h / 2); continue; }
+        this.drawWeaponIcon(ctx, c.id, r.x + r.w / 2, r.y + 19, 17, col);
+        ctx.fillStyle = c.active ? p.text : p.textDim; ctx.font = "700 9px " + theme.fonts.ui;
+        ctx.fillText(c.short, r.x + r.w / 2, r.y + r.h - 16);
+        if (c.keyNum <= 9) { ctx.fillStyle = rgba(p.textDim, 0.8); ctx.font = "600 8px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillText(String(c.keyNum), r.x + r.w - 5, r.y + 4); }   // only 1-9 have a digit hotkey
+        const bw = r.w - 12, bx = r.x + 6, byb = r.y + r.h - 8;
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, 3);
+        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.cdFrac)), 3); }
+        else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.heatFrac)), 3); }
+        if (c.active && !c.cooling) { ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb - 4, bw, 2); ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7); ctx.fillRect(bx, byb - 4, bw * Math.max(0, Math.min(1, c.reloadFrac)), 2); }
+        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "800 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + 13); }
+      }
+
+      // ---- INCOMING pickups (empty-slot outlines, then any waiting pickups) ----
+      for (const r of d.pickupSlots) { ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore(); }
+      for (const pk of d.pickups) {
+        const r = pk.rect, col = pk.color, pulse = 0.65 + 0.35 * Math.sin(now / 140 + r.x);
+        this._dockTile(ctx, theme, r, col, { lw: 2, glow: 8 + 8 * pulse, tint: rgba(col, 0.12 + 0.1 * pulse) });
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        if (pk.isMult) { ctx.fillStyle = "#fff7e0"; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; } ctx.font = "900 18px " + theme.fonts.ui; ctx.fillText("×" + pk.mult, r.x + r.w / 2, r.y + 20); ctx.shadowBlur = 0; }
+        else this.drawWeaponIcon(ctx, pk.weaponId, r.x + r.w / 2, r.y + 19, 18, col);
+        ctx.fillStyle = col; ctx.font = "700 8px " + theme.fonts.ui; ctx.fillText("GRAB", r.x + r.w / 2, r.y + r.h - 15);
+        const bw = r.w - 12, bx = r.x + 6, byb = r.y + r.h - 8;   // life-left bar
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, 3);
+        ctx.fillStyle = col; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, pk.frac)), 3);
+      }
+
+      // ---- KILLSTREAKS (empty slots + meter on the next one, then earned streaks) ----
+      for (let i = 0; i < d.streakSlots.length; i++) {
+        const r = d.streakSlots[i]; ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore();
+        if (i === d.nextSlot && d.streaks.length < d.streakSlots.length) {   // charge meter fills the next empty slot
+          const m = Math.max(0, Math.min(1, d.meter)); ctx.fillStyle = rgba(p.accent, 0.16); rr(ctx, r.x, r.y + r.h * (1 - m), r.w, r.h * m, 7); ctx.fill();
+          ctx.fillStyle = rgba(p.accent, 0.7); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "800 9px " + theme.fonts.ui; ctx.fillText(Math.round(m * 100) + "%", r.x + r.w / 2, r.y + r.h / 2);
+        }
+      }
+      let anyPicked = false;
+      for (const sk of d.streaks) {
+        const r = sk.rect, picked = sk.picked; if (picked) anyPicked = true;
+        this._dockTile(ctx, theme, r, picked ? "#ffffff" : sk.color, { lw: picked ? 3 : 2, glow: picked ? 18 : 10, tint: rgba(sk.color, picked ? 0.34 : 0.16) });
+        this.drawStreakIcon(ctx, sk.id, r.x + r.w / 2, r.y + 20, 20, picked ? "#ffffff" : sk.color);
+        ctx.fillStyle = picked ? "#fff" : sk.color; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(sk.name.split(" ")[0], r.x + r.w / 2, r.y + r.h - 14);
+        if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 9px " + theme.fonts.ui; ctx.fillText("▲", r.x + r.w / 2, r.y - 7); }
+      }
+      if (anyPicked) { ctx.fillStyle = p.text; ctx.font = "800 9px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("RELEASE TO FIRE", w - 10, top + 13); }
+      ctx.restore();
     }
 
     drawVolcano(ctx, theme, v, now) {
@@ -341,67 +427,7 @@
       else if (id === "tesla") { ctx.beginPath(); ctx.moveTo(cx + r * 0.3, cy - r); ctx.lineTo(cx - r * 0.25, cy - r * 0.05); ctx.lineTo(cx + r * 0.15, cy - r * 0.05); ctx.lineTo(cx - r * 0.35, cy + r); ctx.stroke(); }
       else if (id === "singularity") { ctx.beginPath(); ctx.arc(cx, cy, r * 0.72, 0, 6.2832); ctx.stroke(); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, r * 0.28, 0, 6.2832); ctx.fill(); }
       else if (id === "seeker") { ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 0.4, cy + r * 0.18); ctx.lineTo(cx - r * 0.4, cy + r * 0.18); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.arc(cx, cy + r * 0.58, r * 0.28, 0, 6.2832); ctx.stroke(); }
-      ctx.restore();
-    }
-
-    drawWeaponBar(ctx, theme, chips) {
-      const p = theme.palette;
-      for (const c of chips) {
-        const r = c.rect, col = c.color || p.interceptor;
-        ctx.save();
-        ctx.globalAlpha = c.locked ? 0.42 : 1;
-        ctx.fillStyle = "rgba(10,14,22,0.72)"; rr(ctx, r.x, r.y, r.w, r.h, 6); ctx.fill();
-        if (c.cooling) { ctx.fillStyle = "rgba(255,72,72,0.18)"; rr(ctx, r.x, r.y, r.w, r.h, 6); ctx.fill(); }   // unmistakable "this weapon is cooling" tint
-        ctx.lineWidth = c.cooling ? 2.2 : (c.active ? 2.2 : 1);
-        ctx.strokeStyle = c.cooling ? p.enemy : (c.active ? p.accent : rgba(p.textDim, 0.5));
-        rr(ctx, r.x, r.y, r.w, r.h, 6); ctx.stroke();
-        ctx.globalAlpha = 1;
-        if (c.locked) {
-          ctx.fillStyle = p.textDim; ctx.font = "700 13px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          ctx.fillText("?", r.x + r.w / 2, r.y + r.h / 2 - 2);
-        } else {
-          this.drawWeaponIcon(ctx, c.id, r.x + 13, r.y + r.h / 2 - 3, 11, col);
-          ctx.fillStyle = c.active ? p.text : p.textDim; ctx.font = "700 10px " + theme.fonts.ui; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-          if (r.w > 56) ctx.fillText(c.short, r.x + 24, r.y + r.h / 2 - 4);
-          ctx.fillStyle = rgba(p.textDim, 0.85); ctx.font = "600 8px " + theme.fonts.ui; ctx.textAlign = "right";
-          ctx.fillText(String(c.keyNum), r.x + r.w - 6, r.y + 8);
-          const bw = r.w - 10, bx = r.x + 5, byb = r.y + r.h - 6;
-          ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(bx, byb, bw, 3);
-          if (c.cooling) { ctx.fillStyle = p.enemy; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.cdFrac)), 3); }
-          else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.heatFrac)), 3); }
-          if (c.active && !c.cooling) {
-            ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(bx, byb - 4, bw, 2);
-            ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7);
-            ctx.fillRect(bx, byb - 4, bw * Math.max(0, Math.min(1, c.reloadFrac)), 2);
-          }
-          if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + 6); }
-        }
-        ctx.restore();
-      }
-    }
-
-    drawPowerup(ctx, theme, pu, now, weapon) {
-      const p = theme.palette, r = pu.radius, pulse = 0.7 + 0.3 * Math.sin(now / 120);
-      if (pu.kind === "mult") {   // gold ×N multi-fire pod
-        const gold = "#ffd24a";
-        ctx.save(); ctx.translate(pu.x, pu.y);
-        this._glow(ctx, theme, gold, theme.effects.glow ? 18 : 0);
-        ctx.strokeStyle = gold; ctx.lineWidth = 2; ctx.fillStyle = rgba(gold, 0.2 * pulse);
-        ctx.beginPath(); ctx.moveTo(0, -r * 1.3); ctx.lineTo(r, 0); ctx.lineTo(0, r * 1.3); ctx.lineTo(-r, 0); ctx.closePath();
-        ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
-        ctx.fillStyle = "#fff7e0"; ctx.font = "900 " + Math.round(r * 1.25) + "px " + theme.fonts.ui;
-        ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("×" + pu.mult, 0, 1);
-        ctx.restore(); return;
-      }
-      const col = (weapon && weapon.color) || p.powerup;
-      ctx.save();
-      ctx.translate(pu.x, pu.y);
-      this._glow(ctx, theme, col, theme.effects.glow ? 16 : 0);
-      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.fillStyle = rgba(col, 0.18 * pulse);
-      ctx.beginPath(); ctx.moveTo(0, -r * 1.25); ctx.lineTo(r, 0); ctx.lineTo(0, r * 1.25); ctx.lineTo(-r, 0); ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.shadowBlur = 0;
-      this.drawWeaponIcon(ctx, weapon ? weapon.id : "missile", 0, 0, r * 0.95, p.text);
+      else if (id === "napalm") { ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.bezierCurveTo(cx + r * 0.85, cy - r * 0.2, cx + r * 0.5, cy + r * 0.9, cx, cy + r); ctx.bezierCurveTo(cx - r * 0.5, cy + r * 0.9, cx - r * 0.85, cy - r * 0.2, cx, cy - r); ctx.closePath(); ctx.fill(); ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(cx, cy + r * 0.35, r * 0.3, 0, 6.2832); ctx.fill(); }
       ctx.restore();
     }
 
