@@ -1070,7 +1070,7 @@
       const ctx = this.ctx2d, R = this.renderer, th = this.theme;
       R.drawBackground(ctx, th, now, this.groundY);
       let sx = 0, sy = 0;
-      if (this.shakeMag > 0.1) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
+      if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }   // freeze the shake while paused (no jank)
       ctx.save(); ctx.translate(sx, sy);
       for (const c of this.cities) { R.drawCity(ctx, th, c.x, c.alive); if (c.alive) R.drawPeople(ctx, th, c.x, c.panic, now); }
       for (const b of this.batteries) R.drawBattery(ctx, th, b.x, b.alive);
