@@ -158,6 +158,25 @@ html, body {
 .game-card.disabled { opacity: 0.45; cursor: not-allowed; }
 .game-card.disabled:hover { transform: none; box-shadow: none; border-color: var(--border); }
 
+/* per-card SHARE button — copies a deep-link URL for that game */
+.game-card .gc-share {
+  position: absolute; top: 10px; right: 10px; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 9px;
+  border: 1px solid var(--border); background: rgba(0, 0, 0, 0.4);
+  color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; user-select: none;
+  transition: transform 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.game-card .gc-share:hover { color: var(--fg); border-color: var(--card-accent, var(--accent)); background: rgba(0, 0, 0, 0.6); transform: scale(1.1); }
+.game-card .gc-share.copied { color: #0c0; border-color: #3ddc84; background: rgba(60, 220, 132, 0.22); }
+.gc-toast {
+  position: absolute; top: 46px; right: 10px; z-index: 4;
+  padding: 5px 9px; border-radius: 8px; font-size: 11px; font-weight: 700; white-space: nowrap;
+  background: #3ddc84; color: #05140c; box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.7);
+  opacity: 0; transform: translateY(-4px); transition: opacity 0.15s ease, transform 0.15s ease; pointer-events: none;
+}
+.gc-toast.show { opacity: 1; transform: translateY(0); }
+
 .menu-hint { color: var(--muted); font-size: 12px; }
 
 /* ===================== GAME VIEW ===================== */

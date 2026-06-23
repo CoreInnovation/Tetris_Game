@@ -59,6 +59,9 @@
       this.canvas = refs.canvas;
       this.ctx = this.canvas.getContext("2d");
 
+      // Deep-link: ?game=<id> launches straight into that game (captured before showMenu strips it).
+      const deepLink = this._readGameParam();
+
       this._buildMenu();
       this._wireChrome();
       this._wireOverlays();
@@ -85,6 +88,41 @@
 
       this._updateSoundIcon();
       this.showMenu();
+
+      // If we arrived via a shared deep-link, jump straight into that game.
+      if (deepLink) { const mod = Arcade.games.find(g => g.id.toLowerCase() === deepLink); if (mod) this.mountGame(mod); }
+    }
+
+    // Read the ?game=<id> deep-link parameter (lowercased), if any.
+    _readGameParam() {
+      try { const id = new URL(window.location.href).searchParams.get("game"); return id ? id.toLowerCase() : null; } catch (e) { return null; }
+    }
+
+    // The shareable deep-link URL for a given game id (current page + ?game=id, no hash/extra params).
+    _shareUrl(id) {
+      try { const u = new URL(window.location.href); u.search = ""; u.hash = ""; u.searchParams.set("game", id); return u.href; }
+      catch (e) { return (window.location.origin || "") + (window.location.pathname || "") + "?game=" + encodeURIComponent(id); }
+    }
+
+    // Reflect the current view in the address bar so the URL is copy-friendly (best-effort; no-ops on file://).
+    _setUrlGame(id) {
+      try { const u = new URL(window.location.href); u.search = ""; u.hash = ""; if (id) u.searchParams.set("game", id); history.replaceState(null, "", u.href); } catch (e) { /* file:// etc */ }
+    }
+
+    // Copy text to the clipboard, with an execCommand fallback for non-secure contexts. Returns a Promise<bool>.
+    _copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).then(() => true).catch(() => this._copyFallback(text));
+      }
+      return Promise.resolve(this._copyFallback(text));
+    }
+    _copyFallback(text) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; ta.style.top = "0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        const ok = document.execCommand("copy"); document.body.removeChild(ta); return ok;
+      } catch (e) { return false; }
     }
 
     // ---------------- Menu ----------------
@@ -100,8 +138,22 @@
           '<div class="gc-icon">' + (mod.icon || "🎮") + "</div>" +
           '<div class="gc-name">' + esc(mod.name) + "</div>" +
           '<div class="gc-tag">' + esc(mod.tagline || "") + "</div>" +
-          '<div class="gc-best">BEST&nbsp;&nbsp;' + best.toLocaleString() + "</div>";
+          '<div class="gc-best">BEST&nbsp;&nbsp;' + best.toLocaleString() + "</div>" +
+          '<span class="gc-share" role="button" tabindex="0" aria-label="Copy share link" title="Copy link to this game">🔗</span>' +
+          '<span class="gc-toast" aria-hidden="true">Link copied!</span>';
         card.addEventListener("click", () => { this.audio.play("select"); this.mountGame(mod); });
+        const share = card.querySelector(".gc-share"), toast = card.querySelector(".gc-toast");
+        const doShare = (e) => {
+          e.preventDefault(); e.stopPropagation();   // don't launch the game
+          this.audio.play("select");
+          this._copyText(this._shareUrl(mod.id)).then(okCopy => {
+            share.textContent = okCopy ? "✓" : "⚠"; share.classList.add("copied");
+            toast.textContent = okCopy ? "Link copied!" : "Copy failed"; toast.classList.add("show");
+            clearTimeout(share._t); share._t = setTimeout(() => { share.textContent = "🔗"; share.classList.remove("copied"); toast.classList.remove("show"); }, 1500);
+          });
+        };
+        share.addEventListener("click", doShare);
+        share.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") doShare(e); });
         grid.appendChild(card);
       });
 
@@ -134,11 +186,13 @@
       this._hide(this.refs.touchControls);
       this._show(this.refs.menu);
       this._buildMenu(); // refresh high scores
+      this._setUrlGame(null);   // back at the menu -> clean URL
     }
 
     // ---------------- Game lifecycle ----------------
     mountGame(mod) {
       this._module = mod;
+      this._setUrlGame(mod.id);   // reflect the active game in the address bar (copy-friendly)
       this._hide(this.refs.menu);
       this._hide(this.refs.chooserOverlay);   // never let an open chooser bleed onto a freshly-launched game
       this._show(this.refs.gameView);
