@@ -14,8 +14,9 @@
   const BAT_SLOTS = [0, 4, 8], CITY_SLOTS = [1, 2, 3, 5, 6, 7];
   const EJECT_V = 235, COLD_G = 540, EJECT_DELAY = 0.45;
   const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9, SEEK_REACH = 200;
-  const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000, POW_FAVOR = 0.6;
-  const HORNET_SPEED = 510, HORNET_TURN = 10, BH_PULL = 340, ZIG_AMP = 48;
+  const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000;
+  const HORNET_SPEED = 430, HORNET_TURN = 6.5, BH_PULL = 340, ZIG_AMP = 48;   // hornets nerfed: slower + lazier tracking
+  const DOCK_H = 84, POWERUP_LIFE = 11000, POWERUP_SLOTS = 3;   // bottom control dock + how long a pickup waits to be grabbed
 
   // Primitive stats only — reload/heat/cool are DERIVED below from a balance model.
   // minWave = the wave a weapon becomes ELIGIBLE to drop (powerful ones arrive later, so they're
@@ -32,7 +33,7 @@
     // NAPALM — arcs in, splashes a lingering FIRE FIELD that incinerates anything passing through for a few seconds
     { id: "napalm", name: "NAPALM", short: "NAPM", kind: "arc", speed: 820, blast: 46, fire: true, fireR: 86, fireDur: 3.4, manual: true, reload: 520, mag: 4, cd: 1900, minWave: 6, sfx: "boom", color: "#ff6a2a" },
     { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 30, cluster: 8, minWave: 6, sfx: "launch", color: "#ff7a3a" },
-    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 510, blast: 32, pellets: 5, minWave: 7, sfx: "launch", color: "#9aff6a" },
+    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 430, blast: 24, pellets: 3, fuse: 3.2, weight: 1.9, minWave: 7, sfx: "launch", color: "#9aff6a" },
     { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 5, weight: 2.6, minWave: 8, sfx: "rail", color: "#b388ff" },
     { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 120, blackhole: true, weight: 1.6, minWave: 10, sfx: "cryo", color: "#c86bff" }
   ];
@@ -146,7 +147,7 @@
       this.cities = CITY_SLOTS.map(s => ({ slot: s, alive: true, x: 0, panic: false }));
       this.enemies = []; this.interceptors = []; this.explosions = []; this.powerups = [];
       this.pendingBlasts = []; this.ufos = []; this.zaps = []; this.blackholes = []; this.fires = []; this.napGlobs = [];
-      this.streaks = []; this.streakKills = 0; this.streakRects = []; this.drones = []; this.droneShots = []; this.meteors = []; this.meteorN = 0; this.meteorT = 0;
+      this.streaks = []; this.streakKills = 0; this.streakSlots = []; this.pickupSlots = []; this.drones = []; this.droneShots = []; this.meteors = []; this.meteorN = 0; this.meteorT = 0;
       this._rmbDown = false; this._streakSel = 0; this.volcano = null;
       this.weapon = "interceptor";
       this.unlocked = { interceptor: true };
@@ -232,9 +233,11 @@
           return;
         }
         if (e.button !== 0 && e.button !== undefined) return;   // ignore middle/extra buttons
-        const p = toLocal(e);
-        for (const ch of this.weaponChips) { if (p.x >= ch.x && p.x <= ch.x + ch.w && p.y >= ch.y && p.y <= ch.y + ch.h) { this._selectWeapon(ch.id); return; } }
-        for (let k = 0; k < this.streakRects.length; k++) { const r = this.streakRects[k]; if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) { this._useStreak(k); return; } }   // tap a streak chip to unleash it
+        const p = toLocal(e), inR = (r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+        for (const ch of this.weaponChips) { if (inR(ch)) { this._selectWeapon(ch.id); return; } }   // ARSENAL — pick a weapon
+        for (let k = 0; k < this.powerups.length && k < this.pickupSlots.length; k++) { if (inR(this.pickupSlots[k])) { const r = this.pickupSlots[k], pu = this.powerups.splice(k, 1)[0]; pu.x = r.x + r.w / 2; pu.y = r.y + r.h / 2; this._collectPowerup(pu); return; } }   // INCOMING — grab a pickup
+        for (let k = 0; k < this.streaks.length && k < this.streakSlots.length; k++) { if (inR(this.streakSlots[k])) { this._useStreak(k); return; } }   // KILLSTREAKS — unleash one
+        if (p.y >= this.dockTop) return;   // clicked empty dock space -> don't fire into the playfield
         this.aim.x = p.x; this.aim.y = p.y; this._fire(p.x, p.y);
       };
       this._pu = (e) => {
@@ -260,28 +263,38 @@
     _prevUnlocked() { const u = this._unlockedIds(); return u[(u.indexOf(this.weapon) - 1 + u.length) % u.length]; }
 
     _layout(w, h) {
-      this.groundY = h - 46;
+      this.dockH = DOCK_H;
+      this.dockTop = h - this.dockH;
+      this.groundY = this.dockTop - 12;   // thin ground strip sits just above the control dock
       const slotW = (w - 56) / 9, sx = i => 28 + slotW * (i + 0.5);
       this.batteries.forEach(b => b.x = sx(b.slot));
       this.cities.forEach(c => c.x = sx(c.slot));
       this.slotW = slotW;
-      this._layoutChips();
+      this._layoutDock();
     }
 
-    // Weapon chips: dev shows ALL, normal play shows just your collected inventory (<=4). Centered, wraps to rows.
-    _layoutChips() {
-      const w = this._w || 800;
+    // The bottom CONTROL DOCK: one sleek bar holding [ARSENAL .... INCOMING pickups .... KILLSTREAKS].
+    // Lays out clickable rects for weapons (left), powerup pickups (center-right), and killstreak slots (right).
+    _layoutDock() {
+      const w = this._w || 800, pad = 10, gap = 6;
+      const rowY = this.dockTop + 18, tileH = this.dockH - 26;
+      // KILLSTREAKS — square slots anchored to the right edge
+      const sTile = tileH, streakBlockW = STREAK_MAX * sTile + (STREAK_MAX - 1) * gap;
+      const streaksLeft = w - pad - streakBlockW;
+      this.streakSlots = [];
+      for (let i = 0; i < STREAK_MAX; i++) this.streakSlots.push({ x: streaksLeft + i * (sTile + gap), y: rowY, w: sTile, h: tileH });
+      // INCOMING pickups — a few square slots just left of the streaks
+      const pTile = tileH, pickBlockW = POWERUP_SLOTS * pTile + (POWERUP_SLOTS - 1) * gap;
+      const pickLeft = streaksLeft - 16 - pickBlockW;
+      this.pickupSlots = [];
+      for (let i = 0; i < POWERUP_SLOTS; i++) this.pickupSlots.push({ x: pickLeft + i * (pTile + gap), y: rowY, w: pTile, h: tileH });
+      // ARSENAL — your held weapons fill the remaining space on the left (dev shows all)
       const ids = this.dev ? WEAPONS.map(wp => wp.id) : (this.collected ? this.collected.slice() : ["interceptor"]);
-      const n = ids.length, gap = 6, ch = 30;
-      const cols = Math.max(1, Math.min(n, Math.floor((w - 16) / 64)));
-      const cw = Math.max(54, Math.min(110, Math.floor((w - 16 - (cols - 1) * gap) / cols)));
-      this.weaponChips = [];
-      for (let i = 0; i < n; i++) {
-        const r = Math.floor(i / cols), c = i % cols, rowCount = Math.min(cols, n - r * cols);
-        const total = rowCount * cw + (rowCount - 1) * gap, startX = Math.round((w - total) / 2);
-        this.weaponChips.push({ id: ids[i], x: startX + c * (cw + gap), y: 50 + r * (ch + 6), w: cw, h: ch });
-      }
+      const n = Math.max(1, ids.length), wLeft = pad, wRight = pickLeft - 16, avail = Math.max(120, wRight - wLeft);
+      const cw = Math.max(34, Math.min(110, Math.floor((avail - (n - 1) * gap) / n)));
+      this.weaponChips = ids.map((id, i) => ({ id: id, x: wLeft + i * (cw + gap), y: rowY, w: cw, h: tileH }));
     }
+    _layoutChips() { this._layoutDock(); }   // legacy alias (dev toggle / collect calls)
 
     // Collect a weapon into the 4-slot inventory (drops the oldest spare past 4), then equip it.
     _collectWeapon(id) {
@@ -352,23 +365,19 @@
       for (let i = 0; i < 5; i++) { const c = this._spawnEnemy(m.x, Math.min(m.cy, this.groundY - 40), null, "basic"); if (c) c.vx = m.vx + (i - 2) * 90; }
     }
 
+    // Pickups no longer fall through the play area — they arrive in the bottom dock's INCOMING slots, where you click to grab them.
     _spawnPowerup() {
-      const x = rand(this._w * 0.15, this._w * 0.85), vy = this.enemySpeed * 1.5 + 40;
-      if (Math.random() < 0.32) {   // sometimes drop a MULTI-FIRE pod instead of a weapon
-        const mult = Math.random() < 0.62 ? 2 : 3;
-        this.powerups.push({ x: x, y: -12, vy: vy, kind: "mult", mult: mult, radius: 15, t: 0 });
-        return;
-      }
+      if (this.powerups.length >= POWERUP_SLOTS) return;
+      const add = (extra, label) => { this.powerups.push(Object.assign({ t: 0, life: POWERUP_LIFE }, extra)); this.audio.play("ufo"); this._toast("PICKUP ↓ " + label, false, "#ffd24a"); };
+      const mult = () => { const m = Math.random() < 0.62 ? 2 : 3; add({ kind: "mult", mult: m }, "×" + m + " FIRE"); };
+      if (Math.random() < 0.32) return mult();   // sometimes a MULTI-FIRE pod instead of a weapon
       // only offer weapons the wave has unlocked (powerful ones arrive later); prefer ones you don't have yet
       const eligible = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave);
-      if (!eligible.length) {   // nothing unlocked yet -> hand out a multi-fire pod instead
-        const mult = Math.random() < 0.62 ? 2 : 3;
-        this.powerups.push({ x: x, y: -12, vy: vy, kind: "mult", mult: mult, radius: 15, t: 0 }); return;
-      }
+      if (!eligible.length) return mult();
       const locked = eligible.filter(w => !this.unlocked[w.id]);
       const pool = locked.length ? locked : eligible;
       const w = pool[(Math.random() * pool.length) | 0];
-      this.powerups.push({ x: x, y: -12, vy: vy, weapon: w.id, radius: 14, t: 0 });
+      add({ weapon: w.id }, w.name);
     }
 
     _collectPowerup(pu) {
@@ -400,17 +409,6 @@
       this.tracers.push({ x: px, y: py, vx: dx / d * sp, vy: dy / d * sp, life: rand(0.32, 0.6) });
       if (this.theme.effects.particles && Math.random() < 0.5) this.particles.emit({ x: px, y: py - 2, count: 2, colors: ["#ffe08a", "#ffffff"],
         speedMin: 8, speedMax: 46, gravity: 0, drag: 2.2, sizeMin: 1, sizeMax: 2, lifeMin: 0.08, lifeMax: 0.22, glow: this.theme.effects.glow, shape: "circle" });
-    }
-
-    // is there a powerup at/near a clicked point? (so homing weapons only chase a powerup you deliberately aimed at)
-    _powAt(tx, ty) { let best = null, bd = 1e9; for (const pu of this.powerups) { const d = Math.hypot(pu.x - tx, pu.y - ty); if (d < pu.radius + 22 && d < bd) { bd = d; best = pu; } } return best; }
-
-    // homing projectiles vacuum up any powerup they touch (the projectile keeps flying)
-    _catchPowerups(it) {
-      for (let pi = this.powerups.length - 1; pi >= 0; pi--) {
-        const pu = this.powerups[pi];
-        if (Math.hypot(pu.x - it.x, pu.y - it.y) < pu.radius + 12) { this.powerups.splice(pi, 1); this._collectPowerup(pu); }
-      }
     }
 
     _spawnUfo() {
@@ -458,13 +456,11 @@
 
     // spawn ONE shot of weapon w aimed at (tx,ty) — called once per missile in a multi-fire salvo
     _launch(w, bx, by, tx, ty) {
-      // homing weapons LOCK onto a powerup only if you clicked on/near it (else they go for enemies, not unintended pickups)
-      const lockPow = (w.homing || w.kind === "swarm") ? this._powAt(tx, ty) : null;
       if (w.kind === "cold") {
         const n = w.pellets || 1;
         for (let i = 0; i < n; i++) {
           this.interceptors.push(this._proj(w, bx, by, tx, ty, { vx: rand(-26, 26) + (i - (n - 1) / 2) * 16, vy: -EJECT_V * (w.homing ? 1.2 : 1), mode: "eject",
-            igniteTimer: w.homing ? EJECT_DELAY * 0.55 : EJECT_DELAY, ignited: false, guided: true, fuse: 4.5, heading: -Math.PI / 2, homing: !!w.homing, lockPow: lockPow }));
+            igniteTimer: w.homing ? EJECT_DELAY * 0.55 : EJECT_DELAY, ignited: false, guided: true, fuse: 4.5, heading: -Math.PI / 2, homing: !!w.homing }));
         }
         if (this.theme.effects.particles) this.particles.emit({ x: bx, y: by - 4, count: 12, colors: ["#cfd6df", "#ffffff", "#9aa0aa"],
           speedMin: 20, speedMax: 110, angleMin: -Math.PI * 0.95, angleMax: -Math.PI * 0.05, gravity: 90, drag: 1.4,
@@ -481,7 +477,7 @@
         for (let i = 0; i < n; i++) {
           const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.5;   // wider launch fan so the swarm covers more sky
           this.interceptors.push(this._proj(w, bx, by, tx, ty, { mode: "home",
-            vx: Math.cos(a) * HORNET_SPEED, vy: Math.sin(a) * HORNET_SPEED, heading: a, fuse: 4.2, lockPow: lockPow }));
+            vx: Math.cos(a) * HORNET_SPEED, vy: Math.sin(a) * HORNET_SPEED, heading: a, fuse: w.fuse || 3.2 }));
         }
         this._muzzle(bx, by, w);
       } else {
@@ -656,7 +652,7 @@
       this.aim.y = Math.max(0, Math.min(this.groundY - 4, this.aim.y));
 
       if (this.pending > 0) { this.spawnT -= dt; if (this.spawnT <= 0) { this._spawnEnemy(); this.pending--; this.spawnT = this.spawnGap * rand(0.6, 1.4); } }
-      this.powerupT -= dt; if (this.powerupT <= 0 && this.powerups.length < 2) { this._spawnPowerup(); this.powerupT = rand(16000, 28000); }
+      this.powerupT -= dt; if (this.powerupT <= 0 && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(16000, 28000); }
       if (!this.betweenWaves && this.multishotT > 0) { this.multishotT -= dt; if (this.multishotT <= 0) { this.multishot = 1; this.multishotT = 0; this._toast("MULTI-FIRE OFF"); } }   // don't burn powerup time during the wave breather
       this.ufoT -= dt; if (this.ufoT <= 0 && this.wave >= 2 && this.ufos.length < 1) { this._spawnUfo(); this.ufoT = rand(14000, 24000); }
 
@@ -687,8 +683,8 @@
         if (u.x < -50 || u.x > this._w + 50) this.ufos.splice(i, 1);
       }
 
-      // powerups
-      for (let i = this.powerups.length - 1; i >= 0; i--) { const pu = this.powerups[i]; pu.y += pu.vy * s; pu.t += dt; if (pu.y > this.groundY) { this.powerups.splice(i, 1); this._burst(pu.x, this.groundY - 6, "#9aa0aa", 8); } }
+      // powerups wait in the dock's INCOMING slots, ticking down until grabbed (then they quietly expire)
+      if (!this.betweenWaves) for (let i = this.powerups.length - 1; i >= 0; i--) { const pu = this.powerups[i]; pu.t += dt; if (pu.t >= pu.life) { this.powerups.splice(i, 1); this.audio.play("pill"); } }
 
       // black holes: pull enemies/ufos in, then implode
       for (let i = this.blackholes.length - 1; i >= 0; i--) {
@@ -779,14 +775,11 @@
               if (trav >= 0.25 * tot) { it._homeOn = true; it.tx0 = it.tx; it.ty0 = it.ty; }   // short commit, then hunt — snapshot the aim point
             }
             if (it._homeOn) {
-              if (it.lockPow && this.powerups.indexOf(it.lockPow) >= 0) { tgt = it.lockPow; }   // you clicked a powerup -> go get it (ignores reach)
-              else {
-                const R = SEEK_REACH;   // otherwise chase only THREATS within a wide radius of where you aimed (no unintended powerup grabs)
-                let tEn = null, eD = 1e9;
-                for (const m of this.enemies) { if (Math.hypot(m.x - it.tx0, m.y - it.ty0) > R) continue; const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
-                for (const u of this.ufos) { if (Math.hypot(u.x - it.tx0, u.y - it.ty0) > R) continue; const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
-                tgt = tEn;
-              }
+              const R = SEEK_REACH;   // chase only THREATS within a wide radius of where you aimed
+              let tEn = null, eD = 1e9;
+              for (const m of this.enemies) { if (Math.hypot(m.x - it.tx0, m.y - it.ty0) > R) continue; const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
+              for (const u of this.ufos) { if (Math.hypot(u.x - it.tx0, u.y - it.ty0) > R) continue; const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
+              tgt = tEn;
               it.tx = tgt ? tgt.x : it.tx0; it.ty = tgt ? tgt.y : it.ty0;   // nothing to chase -> keep heading to the aim point
             }
           }
@@ -798,7 +791,6 @@
           const dragF = 1 - BURN_DRAG * s; it.vx *= dragF; it.vy *= dragF;
           const sp = Math.hypot(it.vx, it.vy); if (sp > vmax) { it.vx *= vmax / sp; it.vy *= vmax / sp; }
           it.x += it.vx * s; it.y += it.vy * s; it.fuse -= s;
-          this._catchPowerups(it);   // grab powerups it flies through (incl. during the committed phase)
           let trig = (dist <= sp * s + 8 || dist < 14 || it.fuse <= 0);
           if (it.homing && tgt) { if (dist < 28) trig = true; else if (it.prevd != null && dist > it.prevd && dist < 95) trig = true; it.prevd = dist; }
           if (trig) {
@@ -819,20 +811,14 @@
             if (this.theme.effects.particles && Math.random() < 0.6) this.particles.emit({ x: it.x, y: it.y, count: 1, colors: ["#cfd0d6", it.color || "#ffffff"], speedMin: 2, speedMax: 18, gravity: 30, drag: 1.5, sizeMin: 1.2, sizeMax: 2.6, lifeMin: 0.25, lifeMax: 0.55, glow: false, shape: "circle" });
           }
         } else if (it.mode === "home") {
-          let tgt = null, bd = 1e9;
-          if (it.lockPow && this.powerups.indexOf(it.lockPow) >= 0) { tgt = it.lockPow; bd = Math.hypot(tgt.x - it.x, tgt.y - it.y); }   // locked onto a clicked powerup
-          else {   // otherwise hunt only enemies/UFOs (won't divert to unintended powerups)
-            let tEn = null, eD = 1e9;
-            for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
-            for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
-            if (tEn) { tgt = tEn; bd = eD; }
-          }
+          let tgt = null, bd = 1e9;   // hornets hunt the nearest enemy/UFO
+          for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < bd) { bd = d; tgt = m; } }
+          for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < bd) { bd = d; tgt = u; } }
           const aimx = tgt ? tgt.x : it.tx, aimy = tgt ? tgt.y : it.ty;
           let diff = Math.atan2(aimy - it.y, aimx - it.x) - it.heading; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2;
           const mt = HORNET_TURN * s; it.heading += Math.max(-mt, Math.min(mt, diff));
           it.vx = Math.cos(it.heading) * HORNET_SPEED; it.vy = Math.sin(it.heading) * HORNET_SPEED;
           it.x += it.vx * s; it.y += it.vy * s; it.fuse -= s;
-          this._catchPowerups(it);   // hornets scoop up powerups too
           if (this.theme.effects.particles && Math.random() < 0.5) this.particles.emit({ x: it.x, y: it.y, count: 1, colors: [it.color || "#9aff6a", "#ffffff"], speedMin: 2, speedMax: 20, gravity: 0, drag: 1.6, sizeMin: 1.2, sizeMax: 2.4, lifeMin: 0.2, lifeMax: 0.5, glow: this.theme.effects.glow, shape: "circle" });
           let trig = false;
           if (tgt) { if (bd < 28) trig = true; else if (it.prevd != null && bd > it.prevd && bd < 95) trig = true; it.prevd = bd; }
@@ -873,7 +859,6 @@
         if (ex.phase === "grow") { ex.r += (ex.gw || BLAST_GROW) * s; if (ex.r >= ex.maxR) { ex.r = ex.maxR; ex.phase = "shrink"; } } else { ex.r -= BLAST_SHRINK * s; }
         for (let j = this.enemies.length - 1; j >= 0; j--) { const m = this.enemies[j]; if (Math.hypot(m.x - ex.x, m.y - ex.y) < ex.r) { this.enemies.splice(j, 1); this.score += 25 * this.wave; this._addKill(); this._burst(m.x, m.y, this.theme.palette.enemy, 8); this._blast(m.x, m.y, CHAIN_MAX, ex.color); } }
         for (let j = this.ufos.length - 1; j >= 0; j--) { const u = this.ufos[j]; if (Math.hypot(u.x - ex.x, u.y - ex.y) < ex.r + u.radius) { this.ufos.splice(j, 1); const pts = 150 + this.wave * 25; this.score += pts; this._addKill(); this._burst(u.x, u.y, "#46f0c0", 26); this._toast("UFO! +" + pts, true); if (this.theme.effects.shake) this._shake(6); } }
-        for (let j = this.powerups.length - 1; j >= 0; j--) { const pu = this.powerups[j]; if (Math.hypot(pu.x - ex.x, pu.y - ex.y) < ex.r + pu.radius) { this.powerups.splice(j, 1); this._collectPowerup(pu); } }
         if (ex.r <= 0) this.explosions.splice(i, 1);
       }
 
@@ -929,7 +914,6 @@
       for (const bh of this.blackholes) R.drawBlackhole(ctx, th, bh);
       for (const m of this.enemies) R.drawEnemy(ctx, th, m);
       for (const u of this.ufos) R.drawUfo(ctx, th, u, now);
-      for (const pu of this.powerups) R.drawPowerup(ctx, th, pu, now, WMAP[pu.weapon]);
       for (const it of this.interceptors) R.drawInterceptor(ctx, th, it);
       for (const ex of this.explosions) R.drawExplosion(ctx, th, ex);
       for (const f of this.fires) R.drawFire(ctx, th, f, now);
@@ -944,12 +928,22 @@
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, wave: this.wave, cities: this.cities.filter(c => c.alive).length,
         mult: this.multishot || 1, multFrac: this.multishotT > 0 ? this.multishotT / MULT_DURATION : 0 });
-      const chipData = this.weaponChips.map(ch => { const w = WMAP[ch.id]; const cd = this.cdT[ch.id] || 0; return {
+      // ---- bottom CONTROL DOCK: arsenal · incoming pickups · killstreaks ----
+      const chips = this.weaponChips.map(ch => { const w = WMAP[ch.id]; const cd = this.cdT[ch.id] || 0; return {
         rect: ch, short: w.short, id: ch.id, color: w.color, locked: !this.unlocked[ch.id], active: this.weapon === ch.id,
         heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / (this.cdMax[ch.id] || w.cd)) : 0,
         reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / (this.reloadMax[ch.id] || w.reload), keyNum: WEAPONS.indexOf(w) + 1 }; });
-      R.drawWeaponBar(ctx, th, chipData);
-      this.streakRects = R.drawStreakPanel(ctx, th, this.streaks.map(id => SMAP[id]), this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1, this._rmbDown ? this._streakSel : -1);
+      const picks = this.powerups.map((pu, i) => ({ rect: this.pickupSlots[i],
+        weaponId: pu.weapon, mult: pu.mult, isMult: pu.kind === "mult",
+        color: pu.kind === "mult" ? "#ffd24a" : ((WMAP[pu.weapon] && WMAP[pu.weapon].color) || th.palette.powerup),
+        label: pu.kind === "mult" ? ("×" + pu.mult) : (WMAP[pu.weapon] ? WMAP[pu.weapon].short : "?"),
+        frac: Math.max(0, 1 - pu.t / pu.life) })).filter(p => p.rect);
+      const strk = this.streaks.map((id, i) => ({ rect: this.streakSlots[i], id: id, icon: SMAP[id].icon, color: SMAP[id].color,
+        name: SMAP[id].name, picked: this._rmbDown && i === this._streakSel })).filter(s => s.rect);
+      R.drawDock(ctx, th, { dockTop: this.dockTop, dockH: this.dockH, w: this._w, now: now,
+        weapons: chips, pickups: picks, pickupSlots: this.pickupSlots, streaks: strk, streakSlots: this.streakSlots,
+        meter: this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1,
+        nextSlot: Math.min(this.streaks.length, STREAK_MAX - 1) });
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }
