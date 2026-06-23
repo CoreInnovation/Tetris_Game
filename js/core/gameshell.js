@@ -187,12 +187,17 @@
       this._show(this.refs.menu);
       this._buildMenu(); // refresh high scores
       this._setUrlGame(null);   // back at the menu -> clean URL
+      this._setTitle(null);     // back at the menu -> base title
     }
+
+    // Keep the browser tab title in sync: "ChrisKit Arcade" on the menu, "ChrisKit Arcade - <Game>" in a game.
+    _setTitle(gameName) { document.title = gameName ? ("ChrisKit Arcade - " + gameName) : "ChrisKit Arcade"; }
 
     // ---------------- Game lifecycle ----------------
     mountGame(mod) {
       this._module = mod;
       this._setUrlGame(mod.id);   // reflect the active game in the address bar (copy-friendly)
+      this._setTitle(mod.name);   // "ChrisKit Arcade - <Game>"
       this._hide(this.refs.menu);
       this._hide(this.refs.chooserOverlay);   // never let an open chooser bleed onto a freshly-launched game
       this._show(this.refs.gameView);
