@@ -402,6 +402,9 @@
         speedMin: 8, speedMax: 46, gravity: 0, drag: 2.2, sizeMin: 1, sizeMax: 2, lifeMin: 0.08, lifeMax: 0.22, glow: this.theme.effects.glow, shape: "circle" });
     }
 
+    // is there a powerup at/near a clicked point? (so homing weapons only chase a powerup you deliberately aimed at)
+    _powAt(tx, ty) { let best = null, bd = 1e9; for (const pu of this.powerups) { const d = Math.hypot(pu.x - tx, pu.y - ty); if (d < pu.radius + 22 && d < bd) { bd = d; best = pu; } } return best; }
+
     // homing projectiles vacuum up any powerup they touch (the projectile keeps flying)
     _catchPowerups(it) {
       for (let pi = this.powerups.length - 1; pi >= 0; pi--) {
@@ -455,11 +458,13 @@
 
     // spawn ONE shot of weapon w aimed at (tx,ty) — called once per missile in a multi-fire salvo
     _launch(w, bx, by, tx, ty) {
+      // homing weapons LOCK onto a powerup only if you clicked on/near it (else they go for enemies, not unintended pickups)
+      const lockPow = (w.homing || w.kind === "swarm") ? this._powAt(tx, ty) : null;
       if (w.kind === "cold") {
         const n = w.pellets || 1;
         for (let i = 0; i < n; i++) {
           this.interceptors.push(this._proj(w, bx, by, tx, ty, { vx: rand(-26, 26) + (i - (n - 1) / 2) * 16, vy: -EJECT_V * (w.homing ? 1.2 : 1), mode: "eject",
-            igniteTimer: w.homing ? EJECT_DELAY * 0.55 : EJECT_DELAY, ignited: false, guided: true, fuse: 4.5, heading: -Math.PI / 2, homing: !!w.homing }));
+            igniteTimer: w.homing ? EJECT_DELAY * 0.55 : EJECT_DELAY, ignited: false, guided: true, fuse: 4.5, heading: -Math.PI / 2, homing: !!w.homing, lockPow: lockPow }));
         }
         if (this.theme.effects.particles) this.particles.emit({ x: bx, y: by - 4, count: 12, colors: ["#cfd6df", "#ffffff", "#9aa0aa"],
           speedMin: 20, speedMax: 110, angleMin: -Math.PI * 0.95, angleMax: -Math.PI * 0.05, gravity: 90, drag: 1.4,
@@ -476,7 +481,7 @@
         for (let i = 0; i < n; i++) {
           const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.5;   // wider launch fan so the swarm covers more sky
           this.interceptors.push(this._proj(w, bx, by, tx, ty, { mode: "home",
-            vx: Math.cos(a) * HORNET_SPEED, vy: Math.sin(a) * HORNET_SPEED, heading: a, fuse: 4.2 }));
+            vx: Math.cos(a) * HORNET_SPEED, vy: Math.sin(a) * HORNET_SPEED, heading: a, fuse: 4.2, lockPow: lockPow }));
         }
         this._muzzle(bx, by, w);
       } else {
@@ -774,13 +779,15 @@
               if (trav >= 0.25 * tot) { it._homeOn = true; it.tx0 = it.tx; it.ty0 = it.ty; }   // short commit, then hunt — snapshot the aim point
             }
             if (it._homeOn) {
-              const R = SEEK_REACH;   // can only chase threats within a wide radius of where you aimed (takes a little skill)
-              let tEn = null, eD = 1e9, tPow = null, pD = 1e9;
-              for (const m of this.enemies) { if (Math.hypot(m.x - it.tx0, m.y - it.ty0) > R) continue; const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
-              for (const u of this.ufos) { if (Math.hypot(u.x - it.tx0, u.y - it.ty0) > R) continue; const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
-              for (const pu of this.powerups) { if (Math.hypot(pu.x - it.tx0, pu.y - it.ty0) > R) continue; const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < pD) { pD = d; tPow = pu; } }
-              tgt = (tPow && pD * POW_FAVOR <= eD) ? tPow : (tEn || tPow);   // favor powerups a little over enemies
-              it.tx = tgt ? tgt.x : it.tx0; it.ty = tgt ? tgt.y : it.ty0;   // nothing nearby -> keep heading to the aim point
+              if (it.lockPow && this.powerups.indexOf(it.lockPow) >= 0) { tgt = it.lockPow; }   // you clicked a powerup -> go get it (ignores reach)
+              else {
+                const R = SEEK_REACH;   // otherwise chase only THREATS within a wide radius of where you aimed (no unintended powerup grabs)
+                let tEn = null, eD = 1e9;
+                for (const m of this.enemies) { if (Math.hypot(m.x - it.tx0, m.y - it.ty0) > R) continue; const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
+                for (const u of this.ufos) { if (Math.hypot(u.x - it.tx0, u.y - it.ty0) > R) continue; const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
+                tgt = tEn;
+              }
+              it.tx = tgt ? tgt.x : it.tx0; it.ty = tgt ? tgt.y : it.ty0;   // nothing to chase -> keep heading to the aim point
             }
           }
           const dx = it.tx - it.x, dy = it.ty - it.y, dist = Math.hypot(dx, dy);
@@ -812,11 +819,14 @@
             if (this.theme.effects.particles && Math.random() < 0.6) this.particles.emit({ x: it.x, y: it.y, count: 1, colors: ["#cfd0d6", it.color || "#ffffff"], speedMin: 2, speedMax: 18, gravity: 30, drag: 1.5, sizeMin: 1.2, sizeMax: 2.6, lifeMin: 0.25, lifeMax: 0.55, glow: false, shape: "circle" });
           }
         } else if (it.mode === "home") {
-          let tgt = null, bd = 1e9, tEn = null, eD = 1e9, tPow = null, pD = 1e9;
-          for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
-          for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
-          for (const pu of this.powerups) { const d = Math.hypot(pu.x - it.x, pu.y - it.y); if (d < pD) { pD = d; tPow = pu; } }
-          if (tPow && pD * POW_FAVOR <= eD) { tgt = tPow; bd = pD; } else if (tEn) { tgt = tEn; bd = eD; } else if (tPow) { tgt = tPow; bd = pD; }   // favor powerups a little
+          let tgt = null, bd = 1e9;
+          if (it.lockPow && this.powerups.indexOf(it.lockPow) >= 0) { tgt = it.lockPow; bd = Math.hypot(tgt.x - it.x, tgt.y - it.y); }   // locked onto a clicked powerup
+          else {   // otherwise hunt only enemies/UFOs (won't divert to unintended powerups)
+            let tEn = null, eD = 1e9;
+            for (const m of this.enemies) { const d = Math.hypot(m.x - it.x, m.y - it.y); if (d < eD) { eD = d; tEn = m; } }
+            for (const u of this.ufos) { const d = Math.hypot(u.x - it.x, u.y - it.y); if (d < eD) { eD = d; tEn = u; } }
+            if (tEn) { tgt = tEn; bd = eD; }
+          }
           const aimx = tgt ? tgt.x : it.tx, aimy = tgt ? tgt.y : it.ty;
           let diff = Math.atan2(aimy - it.y, aimx - it.x) - it.heading; while (diff > Math.PI) diff -= Math.PI * 2; while (diff < -Math.PI) diff += Math.PI * 2;
           const mt = HORNET_TURN * s; it.heading += Math.max(-mt, Math.min(mt, diff));
