@@ -16,6 +16,7 @@
   const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9, SEEK_REACH = 200;
   const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000;
   const ARMY_RANGE = 300;   // soldiers at a battery only open up when a threat is actually within reach (not always blasting)
+  const MULT_MIN_WAVE = 8;   // ×2/×3 multi-fire pods only start dropping once you're deeper in
   const HORNET_SPEED = 430, HORNET_TURN = 6.5, BH_PULL = 340, ZIG_AMP = 48;   // hornets nerfed: slower + lazier tracking
   const DOCK_H = 120, POWERUP_LIFE = 16000, POWERUP_SLOTS = 3;   // two-row dock + how long a pickup LINGERS (longer so you actually see/grab it)
   // Screen-shake is tuned GENTLE: every _shake() request is scaled down and hard-capped, and it
@@ -467,9 +468,11 @@
       // weighted category roll — prefer weapons you DON'T have yet (the striving), then town upgrades, then a multi-fire
       const lockedW = WEAPONS.filter(w => !w.base && !this.unlocked[w.id]);
       const townPool = TOWN_UPGRADES.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
-      const cats = [["mult", 2]];
+      const cats = [];
+      if (this.wave >= MULT_MIN_WAVE) cats.push(["mult", 2]);   // multi-fire is a later-game drop
       if (lockedW.length) cats.push(["weapon", 6]);
       if (townPool.length) cats.push(["town", 3]);
+      if (!cats.length) cats.push(["mult", 2]);   // safety: always have something to drop
       let total = cats.reduce((a, c) => a + c[1], 0), r = Math.random() * total, pick = cats[0][0];
       for (const c of cats) { if (r < c[1]) { pick = c[0]; break; } r -= c[1]; }
       if (pick === "mult") return mult();
