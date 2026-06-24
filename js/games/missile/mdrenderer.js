@@ -411,7 +411,6 @@
       ctx.textBaseline = "alphabetic"; ctx.fillStyle = rgba(p.textDim, 0.85); ctx.font = "700 " + fs(9) + "px " + theme.fonts.ui; ctx.textAlign = "left";
       const cap = (txt, slot) => { if (slot) ctx.fillText(txt, slot.x + 1, slot.y - fs(4)); };
       if (d.weapons.length) cap("ARSENAL", d.weapons[0].rect);
-      cap("INCOMING", d.pickupSlots[0]);
       cap("MILITIA", d.militiaSlots && d.militiaSlots[0]);
       cap("KILLSTREAKS", d.streakSlots[0]);
 
@@ -433,22 +432,6 @@
         else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.heatFrac)), bh3); }
         if (c.active && !c.cooling) { const rh = Math.max(2, fs(2)); ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb - rh - 2, bw, rh); ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7); ctx.fillRect(bx, byb - rh - 2, bw * Math.max(0, Math.min(1, c.reloadFrac)), rh); }
         if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "800 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + fs(13)); }
-      }
-
-      // ---- INCOMING pickups (empty-slot outlines, then any waiting pickups; clickable -> pulse hard) ----
-      for (const r of d.pickupSlots) { ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore(); }
-      for (const pk of d.pickups) {
-        const r = pk.rect, col = pk.color, pulse = 0.5 + 0.5 * Math.sin(now / 130 + r.x);   // a clickable pickup breathes so you notice you can grab it
-        this._dockTile(ctx, theme, r, col, { lw: 2 + pulse, glow: 8 + 14 * pulse, tint: rgba(col, 0.14 + 0.16 * pulse) });
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        if (pk.isMult) { ctx.fillStyle = "#fff7e0"; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; } ctx.font = "900 " + fs(18) + "px " + theme.fonts.ui; ctx.fillText("×" + pk.mult, r.x + r.w / 2, r.y + r.h * 0.44); ctx.shadowBlur = 0; }
-        else if (pk.isTown) this.drawTownIcon(ctx, pk.townId, r.x + r.w / 2, r.y + r.h * 0.42, fs(17), col);
-        else this.drawWeaponIcon(ctx, pk.weaponId, r.x + r.w / 2, r.y + r.h * 0.42, fs(17), col);
-        if (pk.isTown) this._personBadge(ctx, r.x + r.w - fs(9), r.y + r.h - fs(17), fs(9), col);   // marks this pickup as FOR THE TOWNSFOLK
-        ctx.fillStyle = col; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(pk.isTown ? "TOWN" : "GRAB", r.x + r.w / 2, r.y + r.h - fs(13));
-        const bw = r.w - fs(12), bx = r.x + fs(6), byb = r.y + r.h - fs(7), bh3 = Math.max(2, fs(3));   // life-left bar
-        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, bh3);
-        ctx.fillStyle = col; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, pk.frac)), bh3);
       }
 
       // ---- MILITIA (townsfolk upgrades — display only; person-marked) ----
@@ -486,41 +469,25 @@
         ctx.fillStyle = picked ? "#fff" : sk.color; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(sk.name.split(" ")[0], r.x + r.w / 2, r.y + r.h - fs(13));
         if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.fillText("▲", r.x + r.w / 2, r.y - fs(7)); }
-        else if (si === 0) {   // gentle persistent "press me" arrow over the streak R fires
-          const bounce = Math.abs(Math.sin(now / 230)) * fs(5);
-          ctx.save(); ctx.globalAlpha = 0.55 + 0.45 * kpulse; ctx.fillStyle = sk.color;
-          if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = sk.color; }
-          const ay = r.y - fs(5) - bounce, aw = fs(6);
-          ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - aw, ay - fs(7)); ctx.lineTo(r.x + r.w / 2 + aw, ay - fs(7)); ctx.lineTo(r.x + r.w / 2, ay); ctx.closePath(); ctx.fill();
-          ctx.restore();
-        }
       }
       if (anyPicked) { ctx.fillStyle = p.text; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("RELEASE TO FIRE", w - fs(10), top + fs(13)); }
 
-      // ---- attention cues: a bouncing little arrow points right AT the new item (subtle but obvious) ----
+      // ---- ONE clear indicator PER SECTION when it has something to act on (consistent, not per-tile) ----
       const hint = d.hint || {};
-      const cue = (ms, r, label) => {
-        if (!(ms > 0) || !r) return;
-        const cx = r.x + r.w / 2;
-        const pulse = 0.5 + 0.5 * Math.sin(now / 150), fade = Math.min(1, ms / 700);   // fade out over the last 0.7s
-        const bounce = Math.abs(Math.sin(now / 175)) * fs(7);   // lively little hop above the tile
-        const ay = r.y - fs(6) - bounce;   // arrow tip sits just above the tile, bouncing
-        ctx.save();
-        // soft pulse outline on the tile itself
-        ctx.globalAlpha = fade; ctx.strokeStyle = rgba(p.accent, 0.4 + 0.45 * pulse); ctx.lineWidth = 2;
-        if (theme.effects.glow) { ctx.shadowBlur = 5 + 11 * pulse; ctx.shadowColor = p.accent; }
-        rr(ctx, r.x - 3, r.y - 3, r.w + 6, r.h + 6, 9); ctx.stroke();
-        // tiny label
-        ctx.globalAlpha = fade * (0.7 + 0.3 * pulse); ctx.fillStyle = p.accent;
+      const sectionArrow = (rects, label, alpha) => {
+        if (!rects.length || alpha <= 0) return;
+        const a0 = rects[0], a1 = rects[rects.length - 1], cx = (a0.x + a1.x + a1.w) / 2;
+        const bounce = Math.abs(Math.sin(now / 220)) * fs(6), ay = a0.y - fs(7) - bounce;
+        ctx.save(); ctx.globalAlpha = Math.min(1, alpha); ctx.fillStyle = p.accent;
+        if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = p.accent; }
         ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.font = "800 " + fs(8) + "px " + theme.fonts.ui;
-        ctx.fillText(label, cx, ay - fs(11));
-        // the bouncing downward arrow
-        const aw = fs(6); ctx.beginPath(); ctx.moveTo(cx - aw, ay - fs(8)); ctx.lineTo(cx + aw, ay - fs(8)); ctx.lineTo(cx, ay); ctx.closePath(); ctx.fill();
+        ctx.fillText(label, cx, ay - fs(8));
+        const aw = fs(7); ctx.beginPath(); ctx.moveTo(cx - aw, ay - fs(8)); ctx.lineTo(cx + aw, ay - fs(8)); ctx.lineTo(cx, ay); ctx.closePath(); ctx.fill();
         ctx.restore();
       };
-      cue(hint.arsenal, hint.arsenalRect, "NEW WEAPON");
-      cue(hint.pow, hint.powRect, "GRAB IT");
-      cue(hint.streak, hint.streakRect, "READY");
+      const kpul = 0.5 + 0.5 * Math.sin(now / 300);
+      if (d.streaks.length && !anyPicked) sectionArrow(d.streaks.map(s => s.rect), "USE · R", 0.5 + 0.5 * kpul);   // killstreaks are clickable / press R
+      if (hint.arsenal > 0 && d.weapons.length) sectionArrow(d.weapons.map(c => c.rect), "SELECT", Math.min(1, hint.arsenal / 700));   // a new weapon just landed
       ctx.restore();
     }
 
@@ -590,6 +557,32 @@
       g.addColorStop(0.45, rgba("#ff8a2a", 0.75));
       g.addColorStop(1, rgba("#ff3a10", 0));
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(gb.x, gb.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    // a SUPPLY POD falling from the sky on a little chute — shoot it to earn it
+    drawDrop(ctx, theme, d, now, scale) {
+      const col = d.color || "#ffd24a", x = d.x, y = d.y, R = 14 * (scale || 1);
+      const pulse = 0.6 + 0.4 * Math.sin(now / 140 + x);
+      ctx.save();
+      // parachute canopy + cords
+      ctx.strokeStyle = rgba(col, 0.55); ctx.lineWidth = Math.max(1.2, R * 0.1);
+      ctx.beginPath(); ctx.arc(x, y - R * 1.5, R * 1.05, Math.PI, 0); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - R, y - R * 1.5); ctx.lineTo(x - R * 0.5, y - R * 0.45);
+      ctx.moveTo(x + R, y - R * 1.5); ctx.lineTo(x + R * 0.5, y - R * 0.45);
+      ctx.moveTo(x, y - R * 2.55); ctx.lineTo(x, y - R * 1.5);
+      ctx.stroke();
+      // pod
+      if (theme.effects.glow) { ctx.shadowBlur = 8 + 12 * pulse; ctx.shadowColor = col; }
+      ctx.fillStyle = "rgba(8,12,20,0.85)"; rr(ctx, x - R, y - R * 0.6, R * 2, R * 1.35, R * 0.4); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = col; rr(ctx, x - R, y - R * 0.6, R * 2, R * 1.35, R * 0.4); ctx.stroke();
+      ctx.shadowBlur = 0;
+      // payload icon
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      if (d.kind === "mult") { ctx.fillStyle = "#fff7e0"; ctx.font = "900 " + Math.round(R * 1.1) + "px " + theme.fonts.ui; ctx.fillText("×" + d.mult, x, y + R * 0.08); }
+      else if (d.town) { this.drawTownIcon(ctx, d.town, x, y + R * 0.05, R * 1.1, col); this._personBadge(ctx, x + R - 4, y + R * 0.55, R * 0.5, col); }
+      else this.drawWeaponIcon(ctx, d.weapon, x, y + R * 0.05, R * 1.1, col);
       ctx.restore();
     }
 
