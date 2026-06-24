@@ -13,17 +13,25 @@
     constructor() { this.w = 0; this.h = 0; this.groundY = 0; }
     _glow(ctx, theme, color, amt) { if (theme.effects.glow) { ctx.shadowBlur = amt; ctx.shadowColor = color; } else ctx.shadowBlur = 0; }
 
+    // SKY only — drawn unshaken (full screen) so a screen-shake can't reveal an edge.
     drawBackground(ctx, theme, now, groundY) {
       const w = this.w, h = this.h, p = theme.palette;
       if (theme.effects.bgAnim) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, p.bg1); g.addColorStop(1, p.bg2); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
       else { ctx.fillStyle = p.bg1; ctx.fillRect(0, 0, w, h); }
-      // ground
+    }
+
+    // GROUND — drawn INSIDE the shake transform with the cities/batteries, so the
+    // bases never lift off the ground line when the screen shakes. Overscanned
+    // sideways/downward so the shake offset never exposes a gap.
+    drawGround(ctx, theme, groundY) {
+      const w = this.w, h = this.h, p = theme.palette, o = 16;
       ctx.save();
       this._glow(ctx, theme, p.ground, theme.effects.glow ? 10 : 0);
       ctx.fillStyle = theme.effects.glow ? rgba(p.ground, 0.25) : rgba(p.ground, 0.4);
-      ctx.fillRect(0, groundY, w, h - groundY);
+      ctx.fillRect(-o, groundY, w + o * 2, h - groundY + o);
+      ctx.shadowBlur = 0;
       ctx.strokeStyle = p.ground; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(w, groundY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-o, groundY); ctx.lineTo(w + o, groundY); ctx.stroke();
       ctx.restore();
     }
 

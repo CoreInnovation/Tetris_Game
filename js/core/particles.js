@@ -94,36 +94,49 @@
     render(ctx) {
       const list = this._list;
       if (!list.length) return;
+      const TAU = Math.PI * 2;
       ctx.save();
-      for (let i = 0; i < list.length; i++) {
-        const p = list[i];
-        const t = p.life / p.max;              // 1 -> 0
-        const alpha = p.fade ? Math.max(0, Math.min(1, t)) : 1;
-        const size = p.shrink ? p.size * (0.25 + 0.75 * t) : p.size;
-        if (size <= 0.2) continue;
-        ctx.globalAlpha = alpha;
-        if (p.glow) {
-          ctx.globalCompositeOperation = "lighter";
-          ctx.shadowBlur = size * 2.5;
-          ctx.shadowColor = p.color;
-        } else {
-          ctx.globalCompositeOperation = "source-over";
-          ctx.shadowBlur = 0;
-        }
-        ctx.fillStyle = p.color;
-        if (p.shape === "circle") {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.save();
-          ctx.translate(p.x, p.y);
-          ctx.rotate(p.rot);
-          ctx.fillRect(-size, -size, size * 2, size * 2);
-          ctx.restore();
-        }
-      }
+      // PERF: per-particle ctx.shadowBlur is a framerate killer (it re-rasterizes a
+      // blurred copy of every fill). We drop it entirely and get the glow from
+      // additive blending instead — a faint halo circle + bright core, both cheap
+      // fills. We also render in TWO PASSES (normal, then glow) so the composite
+      // mode flips twice per frame rather than once per particle.
+      ctx.shadowBlur = 0;
+
+      // ---- pass 1: normal particles (source-over) ----
+      ctx.globalCompositeOperation = "source-over";
+      for (let i = 0; i < list.length; i++) { const p = list[i]; if (p.glow) continue; this._paint(ctx, p, false, TAU); }
+
+      // ---- pass 2: glow particles (additive bloom, no shadowBlur) ----
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < list.length; i++) { const p = list[i]; if (!p.glow) continue; this._paint(ctx, p, true, TAU); }
+
+      ctx.globalCompositeOperation = "source-over";
       ctx.restore();
+    }
+
+    _paint(ctx, p, glow, TAU) {
+      const t = p.life / p.max;              // 1 -> 0
+      const alpha = p.fade ? Math.max(0, Math.min(1, t)) : 1;
+      if (alpha <= 0) return;
+      const size = p.shrink ? p.size * (0.25 + 0.75 * t) : p.size;
+      if (size <= 0.2) return;
+      ctx.fillStyle = p.color;
+      if (p.shape === "circle") {
+        if (glow) {   // soft additive halo (replaces shadowBlur)
+          ctx.globalAlpha = alpha * 0.28;
+          ctx.beginPath(); ctx.arc(p.x, p.y, size * 2.1, 0, TAU); ctx.fill();
+        }
+        ctx.globalAlpha = alpha;
+        ctx.beginPath(); ctx.arc(p.x, p.y, size, 0, TAU); ctx.fill();
+      } else {
+        ctx.globalAlpha = alpha;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillRect(-size, -size, size * 2, size * 2);
+        ctx.restore();
+      }
     }
   }
 
