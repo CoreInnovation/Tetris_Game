@@ -182,7 +182,7 @@
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0; this.armyCdT = 0;
       this.statKills = {}; this.statPow = {};   // balance instrumentation: kills by source + powerup spawns by id/category
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
-      this.newWeapon = null; this.newWeaponT = 0;   // big center "NEW WEAPON" banner: id + ms window to select it
+      this.newWeapon = null; this.newWeaponT = 0; this._bannerRect = null;   // big center "NEW WEAPON" banner: id + ms window + clickable rect
       this.remindT = 13000;   // gentle periodic "you have stuff to use" reminder
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
@@ -265,6 +265,7 @@
         }
         if (e.button !== 0 && e.button !== undefined) return;   // ignore middle/extra buttons
         const p = toLocal(e), inR = (r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+        if (this.newWeaponT > 0 && this._bannerRect && this.newWeapon && inR(this._bannerRect)) { this._selectWeapon(this.newWeapon); return; }   // click the big NEW WEAPON banner -> equip it
         for (const ch of this.weaponChips) { if (inR(ch)) { this._selectWeapon(ch.id); return; } }   // ARSENAL — pick a weapon
         for (let k = 0; k < this.powerups.length && k < this.pickupSlots.length; k++) { if (inR(this.pickupSlots[k])) { const r = this.pickupSlots[k], pu = this.powerups.splice(k, 1)[0]; pu.x = r.x + r.w / 2; pu.y = r.y + r.h / 2; this._collectPowerup(pu); return; } }   // INCOMING — grab a pickup
         for (let k = 0; k < this.streaks.length && k < this.streakSlots.length; k++) { if (inR(this.streakSlots[k])) { this._useStreak(k); return; } }   // KILLSTREAKS — unleash one
@@ -570,6 +571,14 @@
     // reload + overheat get FASTER as waves climb (the harder it gets, the more you can blast). Floored so it stays balanced.
     _cooldownScale() { return Math.max(0.5, 1 - (this.wave - 1) * 0.03); }   // wave1 100% -> wave17 ~52% -> floor 50%
 
+    // where a multi-fire salvo's shots are aimed (so the aim preview can show the SAME spots the shots will hit)
+    _salvoPoints(tx, ty) {
+      const m = this.multishot || 1, spread = 95 + (m - 2) * 18;   // keep in lockstep with _fire's salvoSpread
+      const pts = [];
+      for (let mi = 0; mi < m; mi++) pts.push({ x: tx + (mi - (m - 1) / 2) * spread, y: ty });
+      return pts;
+    }
+
     _fire(tx, ty) {
       if (ty >= this.groundY - 4) ty = this.groundY - 4;
       const w = WMAP[this.weapon];
@@ -584,8 +593,7 @@
       if (this.heat[this.weapon] >= 1) { this.heat[this.weapon] = 1; this.cdT[this.weapon] = w.cd * sc; this.cdMax[this.weapon] = this.cdT[this.weapon]; }   // OVERHEAT -> forced cooldown (also faster late-game)
       const bx = best.x, by = this.groundY - 14;
       this.audio.play(w.sfx);
-      const salvoSpread = 95 + (m - 2) * 18;   // double/triple fire fans out WIDE so it blankets a bigger area
-      for (let mi = 0; mi < m; mi++) this._launch(w, bx, by, tx + (mi - (m - 1) / 2) * salvoSpread, ty);
+      for (const pt of this._salvoPoints(tx, ty)) this._launch(w, bx, by, pt.x, pt.y);   // double/triple fire fans out WIDE (see _salvoPoints / aim preview)
     }
 
     // spawn ONE shot of weapon w aimed at (tx,ty) — called once per missile in a multi-fire salvo
@@ -1129,7 +1137,8 @@
       if (this.volcano) R.drawVolcano(ctx, th, this.volcano, now);
       for (const z of this.zaps) R.drawZap(ctx, th, z);
       this.particles.render(ctx);
-      R.drawCrosshair(ctx, th, this.aim.x, this.aim.y);
+      // aim crosshair + (when multi-fire is active) dim markers showing where each extra shot lands
+      R.drawCrosshair(ctx, th, this.aim.x, this.aim.y, (this.multishot || 1) > 1 ? this._salvoPoints(this.aim.x, this.aim.y) : null, this.uiScale);
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, wave: this.wave, cities: this.cities.filter(c => c.alive).length,
         mult: this.multishot || 1, multFrac: this.multishotT > 0 ? this.multishotT / MULT_DURATION : 0, scale: this.uiScale });
@@ -1157,12 +1166,12 @@
         hint: { arsenal: this.hintArsenal, arsenalRect: newChip && newChip.rect,
           pow: this.hintPow, powRect: this.powerups.length ? this.pickupSlots[this.powerups.length - 1] : null,
           streak: this.hintStreak, streakRect: this.streaks.length ? this.streakSlots[this.streaks.length - 1] : null } });
-      // big center "NEW WEAPON" banner with a 3s window to select it
+      // big center "NEW WEAPON" banner with a 3s window to select it (clickable — see _pd)
       if (this.newWeaponT > 0 && this.newWeapon) {
         const nw = WMAP[this.newWeapon];
-        R.drawNewWeaponBanner(ctx, th, { id: this.newWeapon, name: nw.name, color: nw.color || th.palette.accent,
-          frac: Math.max(0, this.newWeaponT / 3000), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon });
-      }
+        this._bannerRect = R.drawNewWeaponBanner(ctx, th, { id: this.newWeapon, name: nw.name, color: nw.color || th.palette.accent,
+          frac: Math.max(0, this.newWeaponT / 3000), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon, scale: this.uiScale });
+      } else this._bannerRect = null;
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }

@@ -527,12 +527,13 @@
     // Big center-top "NEW WEAPON" banner — prominent but compact, with a countdown
     // bar for the select window. Fades in fast, holds, fades out at the end.
     drawNewWeaponBanner(ctx, theme, d) {
-      const p = theme.palette, w = this.w, col = d.color || p.accent;
-      const bw = Math.min(330, w - 36), bh = 56;
+      const p = theme.palette, w = this.w, col = d.color || p.accent, s = d.scale || 1;
+      const bw = Math.min(Math.round(330 * s), w - 36), bh = Math.round(56 * s);
       const bx = (w - bw) / 2, by = Math.max(48, this.h * 0.11);
+      const rect = { x: bx, y: by, w: bw, h: bh };   // returned for click hit-testing (equip-on-click)
       const t = Math.max(0, Math.min(1, d.frac));          // 1 -> 0
       const a = Math.max(0, Math.min(1, Math.min((1 - t) / 0.07, t / 0.16)));   // fade in first ~7%, out last ~16%
-      if (a <= 0) return;
+      if (a <= 0) return rect;
       ctx.save();
       ctx.globalAlpha = a;
       // panel
@@ -540,23 +541,26 @@
       ctx.lineWidth = 2; ctx.strokeStyle = col;
       if (theme.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = col; }
       rr(ctx, bx, by, bw, bh, 12); ctx.stroke(); ctx.shadowBlur = 0;
+      const fs = (px) => Math.round(px * s);
       // weapon icon
-      this.drawWeaponIcon(ctx, d.id, bx + 30, by + bh / 2 - 3, 22, col);
+      this.drawWeaponIcon(ctx, d.id, bx + fs(30), by + bh / 2 - fs(3), fs(22), col);
       // labels
       ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-      ctx.fillStyle = rgba(p.textDim, 0.95); ctx.font = "800 10px " + theme.fonts.ui;
-      ctx.fillText("NEW WEAPON", bx + 56, by + 21);
-      ctx.fillStyle = col; ctx.font = "900 19px " + theme.fonts.ui;
+      ctx.fillStyle = rgba(p.textDim, 0.95); ctx.font = "800 " + fs(10) + "px " + theme.fonts.ui;
+      ctx.fillText("NEW WEAPON", bx + fs(56), by + fs(21));
+      ctx.fillStyle = col; ctx.font = "900 " + fs(19) + "px " + theme.fonts.ui;
       if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = col; }
-      ctx.fillText(d.name, bx + 56, by + 41); ctx.shadowBlur = 0;
+      ctx.fillText(d.name, bx + fs(56), by + fs(41)); ctx.shadowBlur = 0;
       // select hint (or EQUIPPED tick if it's already the active weapon)
-      ctx.textAlign = "right"; ctx.font = "700 9px " + theme.fonts.ui;
-      if (d.active) { ctx.fillStyle = "#9aff8a"; ctx.fillText("EQUIPPED ✓", bx + bw - 12, by + 18); }
-      else { ctx.fillStyle = rgba(p.textDim, 0.85); ctx.fillText(d.keyNum <= 9 ? ("PRESS " + d.keyNum + " · OR TAP ARSENAL") : "TAP ARSENAL TO EQUIP", bx + bw - 12, by + 18); }
+      ctx.textAlign = "right"; ctx.font = "700 " + fs(9) + "px " + theme.fonts.ui;
+      if (d.active) { ctx.fillStyle = "#9aff8a"; ctx.fillText("EQUIPPED ✓", bx + bw - fs(12), by + fs(18)); }
+      else { ctx.fillStyle = rgba(p.textDim, 0.85); ctx.fillText(d.keyNum <= 9 ? ("PRESS " + d.keyNum + " · OR CLICK") : "CLICK TO EQUIP", bx + bw - fs(12), by + fs(18)); }
       // countdown bar
-      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx + 12, by + bh - 9, bw - 24, 3);
-      ctx.fillStyle = col; ctx.fillRect(bx + 12, by + bh - 9, (bw - 24) * t, 3);
+      const cbh = Math.max(2, fs(3));
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx + fs(12), by + bh - fs(9), bw - fs(24), cbh);
+      ctx.fillStyle = col; ctx.fillRect(bx + fs(12), by + bh - fs(9), (bw - fs(24)) * t, cbh);
       ctx.restore();
+      return rect;
     }
 
     drawVolcano(ctx, theme, v, now) {
@@ -582,14 +586,35 @@
       ctx.restore();
     }
 
-    drawCrosshair(ctx, theme, x, y) {
-      const p = theme.palette;
+    drawCrosshair(ctx, theme, x, y, salvo, scale) {
+      const p = theme.palette, s = scale || 1;
       ctx.save();
+      // MULTI-HIT PREVIEW: dim target rings at every extra shot's landing spot, with a faint spread line
+      if (salvo && salvo.length > 1) {
+        const xs = salvo.map(pt => pt.x), x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+        ctx.strokeStyle = rgba(p.crosshair, 0.16); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+        for (const pt of salvo) {
+          if (Math.abs(pt.x - x) < 0.5 && Math.abs(pt.y - y) < 0.5) continue;   // center handled by the bright crosshair
+          ctx.globalAlpha = 0.5;
+          this._glow(ctx, theme, p.crosshair, theme.effects.glow ? 4 : 0);
+          ctx.strokeStyle = rgba(p.crosshair, 0.7); ctx.lineWidth = 1.2;
+          const rr2 = 6 * s;
+          ctx.beginPath(); ctx.arc(pt.x, pt.y, rr2, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(pt.x - rr2 * 1.6, pt.y); ctx.lineTo(pt.x - rr2 * 0.5, pt.y);
+          ctx.moveTo(pt.x + rr2 * 0.5, pt.y); ctx.lineTo(pt.x + rr2 * 1.6, pt.y);
+          ctx.stroke();
+          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        }
+      }
+      // bright main crosshair
       this._glow(ctx, theme, p.crosshair, theme.effects.glow ? 8 : 0);
-      ctx.strokeStyle = p.crosshair; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x - 14, y); ctx.lineTo(x - 4, y); ctx.moveTo(x + 4, y); ctx.lineTo(x + 14, y);
-      ctx.moveTo(x, y - 14); ctx.lineTo(x, y - 4); ctx.moveTo(x, y + 4); ctx.lineTo(x, y + 14); ctx.stroke();
+      ctx.strokeStyle = p.crosshair; ctx.lineWidth = 1.5 * s;
+      const R0 = 9 * s, A = 14 * s, B = 4 * s;
+      ctx.beginPath(); ctx.arc(x, y, R0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - A, y); ctx.lineTo(x - B, y); ctx.moveTo(x + B, y); ctx.lineTo(x + A, y);
+      ctx.moveTo(x, y - A); ctx.lineTo(x, y - B); ctx.moveTo(x, y + B); ctx.lineTo(x, y + A); ctx.stroke();
       ctx.restore();
     }
 
