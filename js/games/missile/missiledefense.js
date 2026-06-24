@@ -17,6 +17,9 @@
   const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000;
   const HORNET_SPEED = 430, HORNET_TURN = 6.5, BH_PULL = 340, ZIG_AMP = 48;   // hornets nerfed: slower + lazier tracking
   const DOCK_H = 120, POWERUP_LIFE = 16000, POWERUP_SLOTS = 3;   // two-row dock + how long a pickup LINGERS (longer so you actually see/grab it)
+  // Screen-shake is tuned GENTLE: every _shake() request is scaled down and hard-capped, and it
+  // decays fast, so even a wall of explosions reads as a firm rumble, not a chaotic earthquake.
+  const SHAKE_SCALE = 0.42, SHAKE_CAP = 5.5, SHAKE_DECAY = 0.06;
 
   // Primitive stats only — reload/heat/cool are DERIVED below from a balance model.
   // minWave = the wave a weapon becomes ELIGIBLE to drop (powerful ones arrive later, so they're
@@ -621,8 +624,8 @@
     _blast(x, y, maxR, color, growMul) {
       this.explosions.push({ x: x, y: y, r: 0, maxR: maxR, phase: "grow", color: color || this.theme.palette.blast, gw: BLAST_GROW * (growMul || 1) });
       this.audio.play("boom");
-      if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: Math.round(maxR / 3),
-        colors: [color || this.theme.palette.blast, "#ffffff"], speedMin: 40, speedMax: maxR * 4, gravity: 60, drag: 1,
+      if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: Math.min(34, Math.round(maxR / 4)),
+        colors: [color || this.theme.palette.blast, "#ffffff"], speedMin: 40, speedMax: Math.min(900, maxR * 4), gravity: 60, drag: 1,
         sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.3, lifeMax: 0.8, glow: this.theme.effects.glow, shape: "circle" });
       if (this.theme.effects.shake) this._shake(Math.min(10, maxR / 8));
     }
@@ -756,7 +759,7 @@
         gravity: 120, drag: 1, sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "square", spin: 6 });
     }
 
-    _shake(m) { this.shakeMag = Math.max(this.shakeMag, m); }
+    _shake(m) { this.shakeMag = Math.min(SHAKE_CAP, Math.max(this.shakeMag, m * SHAKE_SCALE)); }
     _toast(text, big, color) { this.toasts.push({ text: text, born: this._now, life: 1400, big: !!big, color: color || null }); if (this.toasts.length > 4) this.toasts.shift(); }
     _gameOver() { if (this.state === "over") return; this.state = "over"; this.audio.stopMusic(); this.shell.requestGameOver({ score: this.score }); }
 
@@ -764,7 +767,7 @@
     update(dt, now) {
       this._now = now;
       const s = dt / 1000;
-      if (this.shakeMag > 0) { this.shakeMag -= dt * 0.04; if (this.shakeMag < 0) this.shakeMag = 0; }
+      if (this.shakeMag > 0) { this.shakeMag -= dt * SHAKE_DECAY; if (this.shakeMag < 0) this.shakeMag = 0; }
       if (this.flash > 0) { this.flash -= dt / 350; if (this.flash < 0) this.flash = 0; }
       this.particles.update(dt);
       if (this.hintPow > 0) this.hintPow -= dt;        // ~5s "look here!" cues on the dock (tick even between waves)
@@ -1095,6 +1098,7 @@
       let sx = 0, sy = 0;
       if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }   // freeze the shake while paused (no jank)
       ctx.save(); ctx.translate(sx, sy);
+      R.drawGround(ctx, th, this.groundY);   // ground rides WITH the shake so the bases stay planted on it
       for (const c of this.cities) { R.drawCity(ctx, th, c.x, c.alive); if (c.alive) R.drawPeople(ctx, th, c.x, c.panic, now); }
       for (const b of this.batteries) { R.drawBattery(ctx, th, b.x, b.alive); if (b.alive) R.drawSoldiers(ctx, th, b.x, now); }
       R.drawTracers(ctx, th, this.tracers);
