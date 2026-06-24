@@ -18,6 +18,9 @@
   const COLORS = ["R", "Y", "B"];
   const DAS = 130, ARR = 30;
   const LOCK_DELAY = 320;
+  // Soft drop ("down") = controlled fast fall: 2x gravity, accelerating to 10x
+  // while held, floored so it can't teleport. (Hard "drop" = Space/right-click.)
+  const SOFT_BASE_MUL = 2, SOFT_MAX_MUL = 10, SOFT_RAMP_MS = 800, SOFT_FLOOR_MS = 22;
   const FLASH_MS = 190, GAP_MS = 110, WIN_MS = 1500;
 
   function ri(n) { return (Math.random() * n) | 0; }
@@ -96,7 +99,10 @@
       this.paused = false;
       this.state = "playing";
       this._now = 0;
-      this._ctrl = ctx.storage.get("drmario:ctrl", ctx.isTouch ? "gestures" : "gamepad");   // gestures | gamepad | thumb-r | thumb-l
+      // Touch: gestures/gamepad/thumb. Desktop: mouse (default) or keyboard.
+      let ctrl = ctx.storage.get("drmario:ctrl", ctx.isTouch ? "gestures" : "mouse");
+      if (!ctx.isTouch && ctrl !== "mouse" && ctrl !== "keyboard") ctrl = "mouse";   // migrate old desktop defaults
+      this._ctrl = ctrl;
       this._bindInput();
     }
 
@@ -111,7 +117,7 @@
       this.pill = null;
       this.combo = 0;
       this.moveDir = 0; this.dasTimer = 0; this.dasCharged = false; this.arrTimer = 0;
-      this.softDropping = false;
+      this.softDropping = false; this.softHeldMs = 0;
       this.dropTimer = 0; this.lockTimer = 0; this.grounded = false;
       this._phase = null; this._clear = null; this._ptimer = 0; this._winTimer = 0;
       this.shakeMag = 0; this.toasts = [];
@@ -154,9 +160,12 @@
     get touchLabels() { const one = this._ctrl === "thumb-l" || this._ctrl === "thumb-r"; return { left: "◀", right: "▶", soft: one ? "" : "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" }; }
     menus() {
       const self = this, SG = D.SONGS;
+      const profiles = this.shell.isTouch
+        ? [{ id: "gestures", name: "Gestures (one finger)" }, { id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }]
+        : [{ id: "mouse", name: "Mouse + keys" }, { id: "keyboard", name: "Keyboard only" }];
       return {
         control: {
-          profiles: [{ id: "gestures", name: "Gestures (one finger)" }, { id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }],
+          profiles: profiles,
           profile: this._ctrl,
           setProfile: (id) => { self._ctrl = id; self.shell.storage.set("drmario:ctrl", id); }
         },
@@ -214,9 +223,20 @@
       this._unsub.push(input.onDown((code, e, repeat) => this._onKeyDown(code, repeat)));
       this._unsub.push(input.onUp((code) => this._onKeyUp(code)));
       if (this.shell.isTouch) this._bindGestures();
+      else if (Arcade.PointerControls) Arcade.PointerControls.bindMouse(this);   // desktop "mouse" profile
     }
 
     _emitKey(code) { const inp = this.shell.input; inp._down.forEach(fn => fn(code, { code }, false)); inp._up.forEach(fn => fn(code, { code })); }
+
+    // ---- mouse control hooks (see js/core/pointer.js) ----
+    _curCol() { return this.pill ? this.pill.c : null; }
+    _colTarget(clientX) {
+      if (!this.pill || !this.renderer.layout) return this.pill ? this.pill.c : 0;
+      const cursorCol = Arcade.PointerControls.columnAt(this.shell.canvas, clientX, this.renderer.layout, this._w);
+      const maxC = (this.pill.state % 2 === 0) ? 1 : 0;   // horizontal pill spans 2 cols, vertical spans 1
+      let col = Math.round(cursorCol - maxC / 2);
+      return Math.max(0, Math.min(CONFIG.COLS - 1 - maxC, col));
+    }
 
     // GESTURES profile: tap = rotate, drag left/right = move, swipe down = hard drop
     _bindGestures() {
@@ -544,6 +564,9 @@
         }
       }
 
+      // soft-drop hold timer drives the acceleration curve
+      if (this.softDropping) this.softHeldMs += dt; else this.softHeldMs = 0;
+
       // gravity / soft drop
       const p = this.pill;
       this.grounded = this._collideAt(p.r + 1, p.c, p.state, p.cL, p.cR);
@@ -551,7 +574,9 @@
         this.lockTimer += dt;
         if (this.lockTimer >= LOCK_DELAY) this._lock();
       } else {
-        const interval = this.softDropping ? Math.min(this.dropMs, 45) : (this.dev ? 100000 : this.dropMs);
+        const interval = this.softDropping
+          ? Math.max(SOFT_FLOOR_MS, this.dropMs / (SOFT_BASE_MUL + (SOFT_MAX_MUL - SOFT_BASE_MUL) * Math.min(1, this.softHeldMs / SOFT_RAMP_MS)))
+          : (this.dev ? 100000 : this.dropMs);
         this.dropTimer += dt;
         let guard = 0;
         while (this.dropTimer >= interval && guard < 40) {
