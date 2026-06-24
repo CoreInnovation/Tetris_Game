@@ -129,6 +129,17 @@
         }
         ctx.globalAlpha = alpha;
         ctx.beginPath(); ctx.arc(p.x, p.y, size, 0, TAU); ctx.fill();
+      } else if (p.shape === "bone") {   // little dog-bone gib, flips via p.rot
+        ctx.globalAlpha = alpha;
+        ctx.save();
+        ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        const L = size * 2.4, hh = size * 0.42, kn = size * 0.5;
+        ctx.fillRect(-L / 2, -hh, L, hh * 2);
+        ctx.beginPath();
+        ctx.arc(-L / 2, -hh, kn, 0, TAU); ctx.arc(-L / 2, hh, kn, 0, TAU);
+        ctx.arc(L / 2, -hh, kn, 0, TAU); ctx.arc(L / 2, hh, kn, 0, TAU);
+        ctx.fill();
+        ctx.restore();
       } else {
         ctx.globalAlpha = alpha;
         ctx.save();
