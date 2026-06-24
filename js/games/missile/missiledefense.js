@@ -184,6 +184,7 @@
       this.statKills = {}; this.statPow = {};   // balance instrumentation: kills by source + powerup spawns by id/category
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
       this.newWeapon = null; this.newWeaponT = 0; this._bannerRect = null; this._bannerPop = 0;   // big center "NEW WEAPON" banner: id + ms window + clickable rect + click-pop anim
+      this.bannerShards = []; this._bannerShatterT = 0;   // banner shatters into flying shards on click (after a brief pop)
       this.remindT = 13000;   // gentle periodic "you have stuff to use" reminder
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
@@ -292,15 +293,36 @@
 
     _selectWeapon(id) { if (id && this.unlocked[id]) { this.weapon = id; this.audio.play("select"); } else this.audio.play("pill"); }
 
-    // satisfying confirmation when you click the NEW WEAPON banner: it pops + explodes so you KNOW it's selected
+    // satisfying confirmation when you click the NEW WEAPON banner: it pops + flashes, then SHATTERS into shards
     _bannerBoom() {
       const r = this._bannerRect; if (!r) return;
       const cx = r.x + r.w / 2, cy = r.y + r.h / 2, col = (WMAP[this.newWeapon] && WMAP[this.newWeapon].color) || this.theme.palette.accent;
-      this._bannerPop = 1;
+      this._bannerPop = 1; this._bannerShatterT = 170;   // brief pop/flash (the "dope" effect you have), THEN shatter the box
       this.audio.play("extralife");
       if (this.theme.effects.shake) this._shake(7);
       if (this.theme.effects.particles) this.particles.emit({ x: cx, y: cy, count: 48, colors: [col, "#ffffff", "#ffe14a"],
         speedMin: 90, speedMax: 480, gravity: 140, drag: 0.9, sizeMin: 1.5, sizeMax: 5, lifeMin: 0.4, lifeMax: 1.1, glow: this.theme.effects.glow, shape: "circle", spin: 8 });
+    }
+
+    // shatter the banner panel into triangular shards that fan out from its center (like glass breaking)
+    _shatterBanner(r, col) {
+      const cx = r.x + r.w / 2, cy = r.y + r.h / 2, N = 16, P = 2 * (r.w + r.h);
+      const perim = (f) => { let l = ((f % 1) + 1) % 1 * P;   // point at fraction f around the rect perimeter
+        if (l < r.w) return { x: r.x + l, y: r.y }; l -= r.w;
+        if (l < r.h) return { x: r.x + r.w, y: r.y + l }; l -= r.h;
+        if (l < r.w) return { x: r.x + r.w - l, y: r.y + r.h }; l -= r.w;
+        return { x: r.x, y: r.y + r.h - l }; };
+      const pts = [];
+      for (let i = 0; i < N; i++) pts.push(perim((i + rand(-0.25, 0.25)) / N));   // jittered for irregular shards
+      for (let i = 0; i < N; i++) {
+        const a = pts[i], b = pts[(i + 1) % N];
+        const tcx = (cx + a.x + b.x) / 3, tcy = (cy + a.y + b.y) / 3;   // shard centroid
+        const dx = tcx - cx, dy = tcy - cy, d = Math.hypot(dx, dy) || 1, spd = rand(70, 300);
+        const life = rand(0.7, 1.2);
+        this.bannerShards.push({ cx: tcx, cy: tcy, col: col,
+          v: [{ x: cx - tcx, y: cy - tcy }, { x: a.x - tcx, y: a.y - tcy }, { x: b.x - tcx, y: b.y - tcy }],   // verts local to centroid
+          vx: dx / d * spd + rand(-50, 50), vy: dy / d * spd - rand(30, 140), rot: 0, vrot: rand(-9, 9), life: life, max: life });
+      }
     }
     _unlockedIds() { return WEAPONS.filter(w => this.unlocked[w.id]).map(w => w.id); }
     _nextUnlocked() { const u = this._unlockedIds(); return u[(u.indexOf(this.weapon) + 1) % u.length]; }
@@ -772,10 +794,23 @@
       const hd = this.slotW * (heavy ? 1.35 : 0.55);
       let hits = [...this.cities, ...this.batteries].filter(o => o.alive && Math.abs(o.x - x) < hd);
       if (!heavy && hits.length > 1) { hits.sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x)); hits = hits.slice(0, 1); }   // normal: just the nearest structure
-      for (const hit of hits) { hit.alive = false; this._blast(hit.x, this.groundY - 8, heavy ? 64 : 46, heavy ? "#ff3838" : null); this._burst(hit.x, this.groundY - 8, this.theme.palette.enemy, heavy ? 34 : 26); }
+      for (const hit of hits) { hit.alive = false; this._blast(hit.x, this.groundY - 8, heavy ? 64 : 46, heavy ? "#ff3838" : null); this._burst(hit.x, this.groundY - 8, this.theme.palette.enemy, heavy ? 34 : 26); this._gorePeople(hit.x); }
       if (hits.length || heavy) { if (this.theme.effects.shake) this._shake(heavy ? 14 : 9); this.flash = 1; }
       if (heavy && !hits.length) this._blast(x, this.groundY - 8, 64, "#ff3838");   // big boom even on empty ground
       if (this.cities.every(c => !c.alive)) this._gameOver();
+    }
+
+    // the little people go out in a (cartoonish) blaze: red mist + blood droplets + bones flipping about
+    _gorePeople(x) {
+      if (!this.theme.effects.particles) return;
+      const gy = this.groundY - 8, s = this.uiScale || 1;
+      this.particles.emit({ x: x, y: gy, count: 16, colors: ["#c81e2e", "#e0303a", "#7a0e18"], speedMin: 10, speedMax: 95, spread: 22, spreadY: 9,
+        gravity: -10, drag: 1.7, sizeMin: 3, sizeMax: 8 * s, lifeMin: 0.6, lifeMax: 1.5, glow: this.theme.effects.glow, shape: "circle" });   // red mist cloud
+      this.particles.emit({ x: x, y: gy, count: 18, colors: ["#e23a3a", "#ff5a5a", "#a01822"], speedMin: 70, speedMax: 320, angleMin: -Math.PI * 0.95, angleMax: -Math.PI * 0.05,
+        gravity: 540, drag: 0.6, sizeMin: 1.2, sizeMax: 3, lifeMin: 0.4, lifeMax: 0.9, glow: false, shape: "circle" });   // blood droplets
+      this.particles.emit({ x: x, y: gy, count: 11, colors: ["#f2ead8", "#e8dcc0", "#fff7e8"], speedMin: 90, speedMax: 330, angleMin: -Math.PI * 0.9, angleMax: -Math.PI * 0.1,
+        gravity: 560, drag: 0.3, spin: 18, sizeMin: 2.2 * s, sizeMax: 4 * s, lifeMin: 0.7, lifeMax: 1.6, glow: false, shape: "bone" });   // bones flipping about
+      this.audio.play("hurt");
     }
 
     _burst(x, y, color, count) {
@@ -800,6 +835,23 @@
       if (this.hintArsenal > 0) this.hintArsenal -= dt;
       if (this.newWeaponT > 0) { this.newWeaponT -= dt; if (this.newWeaponT <= 0) this.newWeapon = null; }   // big banner window
       if (this._bannerPop > 0) { this._bannerPop -= dt / 240; if (this._bannerPop < 0) this._bannerPop = 0; }   // click-pop decay
+      if (this._bannerShatterT > 0) {   // after the brief pop, the box shatters and is replaced by flying shards
+        this._bannerShatterT -= dt;
+        if (this._bannerShatterT <= 0 && this._bannerRect && this.newWeapon) {
+          const wsh = WMAP[this.newWeapon], col = (wsh && wsh.color) || this.theme.palette.accent;
+          this._shatterBanner(this._bannerRect, col);
+          if (wsh) this._toast("EQUIPPED — " + wsh.name, true, col);
+          this.newWeaponT = 0; this.newWeapon = null; this._bannerRect = null;   // the intact box is gone now
+        }
+      }
+      if (this.bannerShards.length) {   // shard physics
+        const ss = dt / 1000;
+        for (let i = this.bannerShards.length - 1; i >= 0; i--) {
+          const sh = this.bannerShards[i];
+          sh.cx += sh.vx * ss; sh.cy += sh.vy * ss; sh.vy += 900 * ss; sh.rot += sh.vrot * ss; sh.life -= ss;
+          if (sh.life <= 0) this.bannerShards.splice(i, 1);
+        }
+      }
       // gentle reminders "here and there": if you're sitting on a killstreak or a pickup, re-flash its arrow
       this.remindT -= dt;
       if (this.remindT <= 0) {
@@ -1192,6 +1244,19 @@
           frac: Math.max(0, this.newWeaponT / 3000), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon,
           scale: this.uiScale, now: now, pop: this._bannerPop });
       } else this._bannerRect = null;
+      // flying banner shards (the box shattering apart)
+      if (this.bannerShards.length) {
+        const glow = th.effects.glow;
+        for (const sh of this.bannerShards) {
+          const a = Math.max(0, Math.min(1, sh.life / sh.max));
+          ctx.save(); ctx.globalAlpha = a; ctx.translate(sh.cx, sh.cy); ctx.rotate(sh.rot);
+          ctx.beginPath(); ctx.moveTo(sh.v[0].x, sh.v[0].y); ctx.lineTo(sh.v[1].x, sh.v[1].y); ctx.lineTo(sh.v[2].x, sh.v[2].y); ctx.closePath();
+          ctx.fillStyle = "rgba(11,16,24,0.92)"; ctx.fill();
+          ctx.lineWidth = 1.5; ctx.strokeStyle = sh.col;
+          if (glow) { ctx.shadowBlur = 8; ctx.shadowColor = sh.col; }
+          ctx.stroke(); ctx.restore();
+        }
+      }
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }
