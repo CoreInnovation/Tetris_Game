@@ -587,34 +587,35 @@
     }
 
     drawCrosshair(ctx, theme, x, y, salvo, scale) {
-      const p = theme.palette, s = scale || 1;
+      const p = theme.palette, s = scale || 1, TAU = Math.PI * 2;
       ctx.save();
-      // MULTI-HIT PREVIEW: dim target rings at every extra shot's landing spot, with a faint spread line
       if (salvo && salvo.length > 1) {
+        // MULTI-FIRE: the cursor is just an AIM DOT; every shot's impact gets an equal target ring,
+        // so a ×2 reads as "two hits straddling your aim" (no misleading reticle where nothing lands).
         const xs = salvo.map(pt => pt.x), x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
-        ctx.strokeStyle = rgba(p.crosshair, 0.16); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-        for (const pt of salvo) {
-          if (Math.abs(pt.x - x) < 0.5 && Math.abs(pt.y - y) < 0.5) continue;   // center handled by the bright crosshair
-          ctx.globalAlpha = 0.5;
-          this._glow(ctx, theme, p.crosshair, theme.effects.glow ? 4 : 0);
-          ctx.strokeStyle = rgba(p.crosshair, 0.7); ctx.lineWidth = 1.2;
-          const rr2 = 6 * s;
-          ctx.beginPath(); ctx.arc(pt.x, pt.y, rr2, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = rgba(p.crosshair, 0.18); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();   // faint spread line linking the shots
+        this._glow(ctx, theme, p.crosshair, theme.effects.glow ? 6 : 0);
+        ctx.strokeStyle = p.crosshair; ctx.lineWidth = 1.6 * s;
+        const rr2 = 8 * s;
+        for (const pt of salvo) {   // a real target ring at each landing spot
+          ctx.beginPath(); ctx.arc(pt.x, pt.y, rr2, 0, TAU); ctx.stroke();
           ctx.beginPath();
-          ctx.moveTo(pt.x - rr2 * 1.6, pt.y); ctx.lineTo(pt.x - rr2 * 0.5, pt.y);
-          ctx.moveTo(pt.x + rr2 * 0.5, pt.y); ctx.lineTo(pt.x + rr2 * 1.6, pt.y);
+          ctx.moveTo(pt.x - rr2 * 1.5, pt.y); ctx.lineTo(pt.x - rr2 * 0.55, pt.y);
+          ctx.moveTo(pt.x + rr2 * 0.55, pt.y); ctx.lineTo(pt.x + rr2 * 1.5, pt.y);
           ctx.stroke();
-          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
         }
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = rgba(p.crosshair, 0.95); ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, 2 * s), 0, TAU); ctx.fill();   // small aim dot at the cursor
+      } else {
+        // single shot: classic full crosshair right where it'll land
+        this._glow(ctx, theme, p.crosshair, theme.effects.glow ? 8 : 0);
+        ctx.strokeStyle = p.crosshair; ctx.lineWidth = 1.5 * s;
+        const R0 = 9 * s, A = 14 * s, B = 4 * s;
+        ctx.beginPath(); ctx.arc(x, y, R0, 0, TAU); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x - A, y); ctx.lineTo(x - B, y); ctx.moveTo(x + B, y); ctx.lineTo(x + A, y);
+        ctx.moveTo(x, y - A); ctx.lineTo(x, y - B); ctx.moveTo(x, y + B); ctx.lineTo(x, y + A); ctx.stroke();
       }
-      // bright main crosshair
-      this._glow(ctx, theme, p.crosshair, theme.effects.glow ? 8 : 0);
-      ctx.strokeStyle = p.crosshair; ctx.lineWidth = 1.5 * s;
-      const R0 = 9 * s, A = 14 * s, B = 4 * s;
-      ctx.beginPath(); ctx.arc(x, y, R0, 0, Math.PI * 2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x - A, y); ctx.lineTo(x - B, y); ctx.moveTo(x + B, y); ctx.lineTo(x + A, y);
-      ctx.moveTo(x, y - A); ctx.lineTo(x, y - B); ctx.moveTo(x, y + B); ctx.lineTo(x, y + A); ctx.stroke();
       ctx.restore();
     }
 
