@@ -23,7 +23,14 @@
   // Tuning
   const DAS = 130;          // ms before auto-shift kicks in
   const ARR = 22;           // ms between auto-shifts
-  const SOFT_MAX_INTERVAL = 40; // ms per cell while soft dropping
+  // Soft drop ("down") is a CONTROLLED fast fall, not an instant slam: it
+  // starts a touch faster than gravity (2x) and accelerates the longer it's
+  // held, up to a cap, but is floored so it can never teleport a piece. (The
+  // instant slam is the separate hard "drop" — Space / right-click.)
+  const SOFT_BASE_MUL = 2;   // begins at 2x current gravity
+  const SOFT_MAX_MUL = 10;   // accelerates up to 10x while held
+  const SOFT_RAMP_MS = 800;  // ms of holding to reach max speed
+  const SOFT_FLOOR_MS = 22;  // hard minimum ms/cell (sanity clamp)
   const LOCK_DELAY = 500;   // ms resting before lock
   const MAX_LOCK_RESETS = 15;
   const LINE_SCORES = [0, 100, 300, 500, 800];
@@ -72,6 +79,9 @@
     ]
   };
   const SONGS = [
+    // Index 0 is "Off" — Tetris boots silent on every page load (opt-in music,
+    // so nobody accidentally blasts a tune at the office). Cycle to turn it on.
+    { id: "off", name: "Off", song: null },
     { id: "classic", name: "Korobeiniki", song: SONG_CLASSIC },
     { id: "techno", name: "Techno Remix", song: SONG_TECHNO }
   ];
@@ -104,13 +114,17 @@
 
       const savedTheme = ctx.storage.get("tetris:theme", "modern");
       this.theme = T.getTheme(savedTheme);
-      this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("tetris:song", 0) | 0));
+      // Boot silent by default (index 0 = Off); music is opt-in per session.
+      this.songIdx = 0;
       this.dev = false;
 
       this._unsub = [];
       this.paused = false;
       this.state = "playing"; // playing | clearing | over
-      this._ctrl = ctx.storage.get("tetris:ctrl", ctx.isTouch ? "gestures" : "gamepad");   // gestures | gamepad | thumb-r | thumb-l
+      // Touch: gestures/gamepad/thumb profiles. Desktop: mouse (default) or keyboard.
+      let ctrl = ctx.storage.get("tetris:ctrl", ctx.isTouch ? "gestures" : "mouse");
+      if (!ctx.isTouch && ctrl !== "mouse" && ctrl !== "keyboard") ctrl = "mouse";   // migrate old desktop defaults
+      this._ctrl = ctrl;
 
       this._bindInput();
     }
@@ -149,6 +163,7 @@
       this.dasCharged = false;
       this.arrTimer = 0;
       this.softDropping = false;
+      this.softHeldMs = 0;
 
       this.clearRows = [];
       this.clearTimer = 0;
@@ -172,18 +187,23 @@
     pause() { this.paused = true; this.moveDir = 0; this.softDropping = false; this.audio.suspendMusic(); }
     resume() { this.paused = false; this.audio.resumeMusic(); this._applyTempo(); }
 
-    // music: play the chosen track and scale its tempo to the level
-    _applyMusic() { this.audio.playMusic(SONGS[this.songIdx].song); this._applyTempo(); }
+    // music: play the chosen track and scale its tempo to the level ("Off" = silence)
+    _applyMusic() {
+      const s = SONGS[this.songIdx] && SONGS[this.songIdx].song;
+      if (!s) { this.audio.stopMusic(); return; }
+      this.audio.playMusic(s); this._applyTempo();
+    }
     _applyTempo() {
-      const base = SONGS[this.songIdx].song.bpm;
-      this.audio.setMusicTempo(Math.round(base * Math.min(1.6, 1 + (this.level - 1) * 0.03)));
+      const s = SONGS[this.songIdx] && SONGS[this.songIdx].song;
+      if (!s) return;
+      this.audio.setMusicTempo(Math.round(s.bpm * Math.min(1.6, 1 + (this.level - 1) * 0.03)));
     }
     cycleMusic() {
       this.songIdx = (this.songIdx + 1) % SONGS.length;
       this.shell.storage.set("tetris:song", this.songIdx);
       this._applyMusic();
       const name = SONGS[this.songIdx].name;
-      this._toast("♪ " + name, this.theme.palette.accent);
+      this._toast(name === "Off" ? "♪ Music Off" : "♪ " + name, this.theme.palette.accent);
       return name;
     }
     toggleDev() { this.dev = !this.dev; this._toast(this.dev ? "DEV: gravity paused" : "DEV OFF", this.theme.palette.accent, true); return this.dev; }
@@ -209,9 +229,12 @@
     get touchLabels() { const one = this._ctrl === "thumb-l" || this._ctrl === "thumb-r"; return { left: "◀", right: "▶", soft: one ? "" : "▼", cw: "⟳", hard: "DROP", ccw: "", hold: "" }; }
     menus() {
       const self = this, SG = T.SONGS;
+      const profiles = this.shell.isTouch
+        ? [{ id: "gestures", name: "Gestures (one finger)" }, { id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }]
+        : [{ id: "mouse", name: "Mouse + keys" }, { id: "keyboard", name: "Keyboard only" }];
       return {
         control: {
-          profiles: [{ id: "gestures", name: "Gestures (one finger)" }, { id: "gamepad", name: "Gamepad (two thumbs)" }, { id: "thumb-r", name: "One-thumb (right)" }, { id: "thumb-l", name: "One-thumb (left)" }],
+          profiles: profiles,
           profile: this._ctrl,
           setProfile: (id) => { self._ctrl = id; self.shell.storage.set("tetris:ctrl", id); }
         },
@@ -226,10 +249,24 @@
       this._unsub.push(input.onDown((code, e, repeat) => this._onKeyDown(code, repeat)));
       this._unsub.push(input.onUp((code) => this._onKeyUp(code)));
       if (this.shell.isTouch) this._bindGestures();
+      else if (Arcade.PointerControls) Arcade.PointerControls.bindMouse(this);   // desktop "mouse" profile
     }
 
-    // synthesize a key tap to the game's own handlers (used by gesture controls)
+    // synthesize a key tap to the game's own handlers (used by gesture/mouse controls)
     _emitKey(code) { const inp = this.shell.input; inp._down.forEach(fn => fn(code, { code }, false)); inp._up.forEach(fn => fn(code, { code })); }
+
+    // ---- mouse control hooks (see js/core/pointer.js) ----
+    _curCol() { return this.cur ? this.cur.col : null; }
+    _colTarget(clientX) {
+      if (!this.cur || !this.renderer.layout) return this.cur ? this.cur.col : 0;
+      const cursorCol = Arcade.PointerControls.columnAt(this.shell.canvas, clientX, this.renderer.layout, this._w);
+      // center the piece's occupied span under the cursor, then clamp to the field
+      const m = Pieces.matrixFor(this.cur.type, this.cur.rot);
+      let minC = 99, maxC = -1;
+      for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) if (m[r][c]) { if (c < minC) minC = c; if (c > maxC) maxC = c; }
+      let col = Math.round(cursorCol - (minC + maxC) / 2);
+      return Math.max(-minC, Math.min(CONFIG.COLS - 1 - maxC, col));
+    }
 
     // GESTURES profile: tap = rotate, drag left/right = move (one cell per ~26px), swipe down = hard drop
     _bindGestures() {
@@ -640,6 +677,9 @@
         }
       }
 
+      // soft-drop hold timer drives the acceleration curve
+      if (this.softDropping) this.softHeldMs += dt; else this.softHeldMs = 0;
+
       // ---- gravity / soft drop ----
       this.grounded = this._collides(this.cur.type, this.cur.rot, this.cur.row + 1, this.cur.col);
       if (this.grounded) {
@@ -647,7 +687,7 @@
         if (this.lockTimer >= LOCK_DELAY) this._lock();
       } else {
         const interval = this.softDropping
-          ? Math.min(this.gravityMs, SOFT_MAX_INTERVAL)
+          ? Math.max(SOFT_FLOOR_MS, this.gravityMs / (SOFT_BASE_MUL + (SOFT_MAX_MUL - SOFT_BASE_MUL) * Math.min(1, this.softHeldMs / SOFT_RAMP_MS)))
           : (this.dev ? 100000 : this.gravityMs);
         this.dropTimer += dt;
         let guard = 0, softSteps = 0;
