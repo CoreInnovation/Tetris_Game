@@ -871,7 +871,7 @@
       this.aim.y = Math.max(0, Math.min(this.groundY - 4, this.aim.y));
 
       if (this.pending > 0) { this.spawnT -= dt; if (this.spawnT <= 0) { this._spawnEnemy(); this.pending--; this.spawnT = this.spawnGap * rand(0.6, 1.4); } }
-      this.powerupT -= dt; if (this.powerupT <= 0 && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(7000, 12000); }   // a supply pod drops every ~7-12s — a noticeable event you shoot to earn
+      this.powerupT -= dt; if (this.powerupT <= 0 && !this.betweenWaves && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(7000, 12000); }   // a supply pod drops every ~7-12s — a noticeable event you shoot to earn (not during the breather)
       if (!this.betweenWaves && this.multishotT > 0) { this.multishotT -= dt; if (this.multishotT <= 0) { this.multishot = 1; this.multishotT = 0; this._toast("MULTI-FIRE OFF"); } }   // don't burn powerup time during the wave breather
       this.ufoT -= dt; if (this.ufoT <= 0 && this.wave >= 2 && this.ufos.length < 1) { this._spawnUfo(); this.ufoT = rand(14000, 24000); }
 
@@ -1174,6 +1174,12 @@
         const aliveCities = this.cities.filter(c => c.alive).length;
         const bonus = aliveCities * 120;
         if (bonus > 0) { this.score += bonus; this._toast("+" + bonus + " BONUS", true); }
+        if (this.powerups.length) {   // pending pods SHATTER (heartbreaking) instead of freezing in the sky — you snooze, you lose
+          const R = 14 * (this.uiScale || 1);
+          for (const pu of this.powerups) this._shatterBanner({ x: pu.x - R, y: pu.y - R * 0.6, w: R * 2, h: R * 1.35 }, pu.color || "#ffd24a");
+          this.audio.play("drain"); this._toast("SUPPLIES LOST — TOO SLOW!", true, "#ff7a7a");
+          this.powerups.length = 0;
+        }
         this.betweenWaves = true; this.waveBreakT = 5000;
       }
       if (this.betweenWaves) {
@@ -1251,12 +1257,17 @@
         }
       }
       if (this.betweenWaves) {   // breather countdown between waves
-        const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        const p = th.palette, s = this.uiScale || 1, cy = this._h * 0.40, pulse = 0.5 + 0.5 * Math.sin(now / 260);
+        ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }
-        ctx.fillStyle = p.accent; ctx.font = "800 30px " + th.fonts.ui;
-        ctx.fillText("WAVE " + this.wave + " CLEARED", this._w / 2, this._h * 0.42);
-        ctx.shadowBlur = 0; ctx.fillStyle = p.textDim; ctx.font = "600 18px " + th.fonts.ui;
-        ctx.fillText("NEXT WAVE IN " + Math.ceil(this.waveBreakT / 1000), this._w / 2, this._h * 0.42 + 34);
+        ctx.fillStyle = p.accent; ctx.font = "800 " + Math.round(30 * s) + "px " + th.fonts.ui;
+        ctx.fillText("WAVE " + this.wave + " CLEARED", this._w / 2, cy);
+        // new-round flourish: fresh supplies, anything is possible
+        ctx.fillStyle = "#ffe14d"; ctx.globalAlpha = 0.6 + 0.4 * pulse; ctx.font = "800 " + Math.round(16 * s) + "px " + th.fonts.ui;
+        if (th.effects.glow) ctx.shadowColor = "#ffe14d";
+        ctx.fillText("⚡ FRESH DROPS INCOMING — ANYTHING IS POSSIBLE ⚡", this._w / 2, cy + Math.round(30 * s));
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.fillStyle = p.textDim; ctx.font = "600 " + Math.round(18 * s) + "px " + th.fonts.ui;
+        ctx.fillText("WAVE " + (this.wave + 1) + " IN " + Math.ceil(this.waveBreakT / 1000), this._w / 2, cy + Math.round(58 * s));
         ctx.restore();
       }
       this._renderToasts(ctx, R, th, now);
