@@ -476,6 +476,28 @@
         if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 9px " + theme.fonts.ui; ctx.fillText("▲", r.x + r.w / 2, r.y - 7); }
       }
       if (anyPicked) { ctx.fillStyle = p.text; ctx.font = "800 9px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("RELEASE TO FIRE", w - 10, top + 13); }
+
+      // ---- attention cues: a ~5s "look here!" highlight when something new lands (subtle but obvious) ----
+      const hint = d.hint || {};
+      const cue = (ms, slots, label) => {
+        if (!(ms > 0) || !slots || !slots.length) return;
+        const a = slots[0], b = slots[slots.length - 1], x0 = a.x - 4, x1 = b.x + b.w + 4, cx = (x0 + x1) / 2;
+        const pulse = 0.5 + 0.5 * Math.sin(now / 150), fade = Math.min(1, ms / 700);   // gentle pulse; fade out in the last 0.7s
+        ctx.save(); ctx.globalAlpha = fade;
+        ctx.strokeStyle = rgba(p.accent, 0.45 + 0.45 * pulse); ctx.lineWidth = 2;
+        if (theme.effects.glow) { ctx.shadowBlur = 6 + 12 * pulse; ctx.shadowColor = p.accent; }
+        rr(ctx, x0, a.y - 4, x1 - x0, a.h + 8, 9); ctx.stroke(); ctx.shadowBlur = 0;
+        // bobbing chevron + tiny label above the section
+        const by = a.y - 9 - Math.abs(Math.sin(now / 220)) * 4;
+        ctx.fillStyle = p.accent; ctx.globalAlpha = fade * (0.6 + 0.4 * pulse);
+        ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.font = "800 8px " + theme.fonts.ui;
+        ctx.fillText(label, cx, by - 5);
+        ctx.beginPath(); ctx.moveTo(cx - 5, by); ctx.lineTo(cx + 5, by); ctx.lineTo(cx, by + 5); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      };
+      cue(hint.arsenal, d.weapons.map(c => c.rect), "NEW WEAPON");
+      cue(hint.pow, d.pickups.length ? d.pickupSlots : null, "GRAB IT");
+      cue(hint.streak, d.streaks.length ? d.streakSlots.slice(0, d.streaks.length) : null, "READY");
       ctx.restore();
     }
 
