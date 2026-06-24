@@ -185,7 +185,6 @@
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
       this.newWeapon = null; this.newWeaponT = 0; this._bannerRect = null; this._bannerPop = 0;   // big center "NEW WEAPON" banner: id + ms window + clickable rect + click-pop anim
       this.bannerShards = []; this._bannerShatterT = 0;   // banner shatters into flying shards on click (after a brief pop)
-      this.remindT = 13000;   // gentle periodic "you have stuff to use" reminder
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(4000, 7000); this.ufoT = rand(11000, 17000);
@@ -269,7 +268,6 @@
         const p = toLocal(e), inR = (r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
         if (this.newWeaponT > 0 && this._bannerRect && this.newWeapon && inR(this._bannerRect)) { this._selectWeapon(this.newWeapon); this._bannerBoom(); return; }   // click the big NEW WEAPON banner -> equip it + pop/explode
         for (const ch of this.weaponChips) { if (inR(ch)) { this._selectWeapon(ch.id); return; } }   // ARSENAL — pick a weapon
-        for (let k = 0; k < this.powerups.length && k < this.pickupSlots.length; k++) { if (inR(this.pickupSlots[k])) { const r = this.pickupSlots[k], pu = this.powerups.splice(k, 1)[0]; pu.x = r.x + r.w / 2; pu.y = r.y + r.h / 2; this._collectPowerup(pu); return; } }   // INCOMING — grab a pickup
         for (let k = 0; k < this.streaks.length && k < this.streakSlots.length; k++) { if (inR(this.streakSlots[k])) { this._useStreak(k); return; } }   // KILLSTREAKS — unleash one
         if (p.y >= this.dockTop) return;   // clicked empty dock space -> don't fire into the playfield
         this.aim.x = p.x; this.aim.y = p.y; this._fire(p.x, p.y);
@@ -355,17 +353,14 @@
       const rightLeft = w - pad - streakBlockW;
       this.streakSlots = [];
       for (let i = 0; i < STREAK_MAX; i++) this.streakSlots.push({ x: rightLeft + i * (sTile + gap), y: row2Y, w: sTile, h: tileH });
-      // INCOMING pickups — right-aligned on row 1 (same right edge as the streaks)
-      const pTile = tileH, pickBlockW = POWERUP_SLOTS * pTile + (POWERUP_SLOTS - 1) * gap, pickLeft = w - pad - pickBlockW;
-      this.pickupSlots = [];
-      for (let i = 0; i < POWERUP_SLOTS; i++) this.pickupSlots.push({ x: pickLeft + i * (pTile + gap), y: row1Y, w: pTile, h: tileH });
+      this.pickupSlots = [];   // pickups fall from the sky now (no dock INCOMING slots)
       // MILITIA — townsfolk upgrade slots on row 2 left
       const mTile = tileH, milBlockW = TOWN_MAX * mTile + (TOWN_MAX - 1) * gap;
       this.militiaSlots = [];
       for (let i = 0; i < TOWN_MAX; i++) this.militiaSlots.push({ x: pad + i * (mTile + gap), y: row2Y, w: mTile, h: tileH });
-      // ARSENAL — your held weapons fill row 1 left (dev shows all), bounded by the INCOMING block
+      // ARSENAL — your held weapons fill row 1 (dev shows all); spans the full width now that INCOMING is gone
       const ids = this.dev ? WEAPONS.map(wp => wp.id) : (this.collected ? this.collected.slice() : ["interceptor"]);
-      const n = Math.max(1, ids.length), wLeft = pad, wRight = pickLeft - Math.round(14 * s), avail = Math.max(120 * s, wRight - wLeft);
+      const n = Math.max(1, ids.length), wLeft = pad, wRight = w - pad, avail = Math.max(120 * s, wRight - wLeft);
       const cw = Math.max(Math.round(34 * s), Math.min(Math.round(96 * s), Math.floor((avail - (n - 1) * gap) / n)));
       this.weaponChips = ids.map((id, i) => ({ id: id, x: wLeft + i * (cw + gap), y: row1Y, w: cw, h: tileH }));
     }
@@ -385,12 +380,15 @@
       this._layoutChips();
     }
 
-    // pick from a list, biased toward higher minWave so the BEST weapons/upgrades drop more as you progress
-    _weightedByWave(list) {
+    // Drop rarity: PROGRESSIVE RANDOM — weaker stuff is common, each step up in power is rarer,
+    // and the powerful gear slowly becomes more reachable as waves climb (never hard-gated by level).
+    // power ~ the item's old minWave. A weapon `power` steps above the "current tier" decays by 0.55 each step.
+    _dropWeight(power) { return Math.pow(0.55, Math.max(0, (power || 1) - (1 + this.wave * 0.35))); }
+    _weightedPick(list, powerOf) {
       if (!list.length) return null;
-      let tot = 0; for (const w of list) tot += (w.minWave || 1);
+      let tot = 0; for (const it of list) tot += this._dropWeight(powerOf(it));
       let r = Math.random() * tot;
-      for (const w of list) { r -= (w.minWave || 1); if (r <= 0) return w; }
+      for (const it of list) { r -= this._dropWeight(powerOf(it)); if (r <= 0) return it; }
       return list[list.length - 1];
     }
 
@@ -450,33 +448,34 @@
       for (let i = 0; i < 5; i++) { const c = this._spawnEnemy(m.x, Math.min(m.cy, this.groundY - 40), null, "basic"); if (c) c.vx = m.vx + (i - 2) * 90; }
     }
 
-    // Pickups no longer fall through the play area — they arrive in the bottom dock's INCOMING slots, where you click to grab them.
+    // A supply pod DROPS FROM THE SKY — you earn it by shooting it (a blast scoops it up); miss it and it's lost.
+    // No level gates: any weapon/upgrade can drop at any time, just weighted so powerful gear is RARE (rarer the earlier you are).
     _spawnPowerup() {
       if (this.powerups.length >= POWERUP_SLOTS) return;
-      const add = (extra, label, col) => { if (this.statPow) { const k = extra.town ? "town:" + extra.town : (extra.kind === "mult" ? "mult" : "weapon:" + extra.weapon); this.statPow[k] = (this.statPow[k] || 0) + 1; } this.powerups.push(Object.assign({ t: 0, life: POWERUP_LIFE }, extra)); this.audio.play("ufo"); this.hintPow = 5000; this._toast("PICKUP ↓ " + label, true, col || "#ffd24a"); };
-      const mult = () => { const m = Math.random() < 0.62 ? 2 : 3; add({ kind: "mult", mult: m }, "×" + m + " FIRE"); };
-      const town = () => {   // a MILITIA upgrade for the townsfolk (prefer weapons you don't have yet; enhancers can repeat to level up)
-        const elig = TOWN_UPGRADES.filter(u => (u.minWave || 1) <= this.wave);
-        const fresh = elig.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
-        const pool = fresh.length ? fresh : elig;
-        const u = this._weightedByWave(pool);
-        add({ town: u.id }, u.name, u.color);
+      const addPod = (extra, label, col) => {
+        if (this.statPow) { const k = extra.town ? "town:" + extra.town : (extra.kind === "mult" ? "mult" : "weapon:" + extra.weapon); this.statPow[k] = (this.statPow[k] || 0) + 1; }
+        const x = rand(70, this._w - 70);
+        this.powerups.push(Object.assign({ x: x, y: -16, vx: rand(-18, 18), vy: rand(46, 70), sway: rand(0, 6.28), t: 0, color: col || "#ffd24a" }, extra));
+        this.audio.play("ufo"); this._toast("DROP INBOUND ↓ " + label + " — shoot it!", true, col || "#ffd24a");
       };
-      // weighted category roll, adapting to what the wave has unlocked
-      const wpnElig = WEAPONS.some(w => !w.base && (w.minWave || 1) <= this.wave);
-      const townElig = TOWN_UPGRADES.some(u => (u.minWave || 1) <= this.wave);
+      const mult = () => { const m = Math.random() < 0.62 ? 2 : 3; addPod({ kind: "mult", mult: m }, "×" + m + " FIRE"); };
+      const town = () => {   // a MILITIA upgrade for the townsfolk (prefer weapons you don't have yet; enhancers can repeat to level up)
+        const fresh = TOWN_UPGRADES.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
+        const u = this._weightedPick(fresh.length ? fresh : TOWN_UPGRADES, x => x.minWave);
+        addPod({ town: u.id }, u.name, u.color);
+      };
+      // weighted category roll — prefer weapons you DON'T have yet (the striving), then town upgrades, then a multi-fire
+      const lockedW = WEAPONS.filter(w => !w.base && !this.unlocked[w.id]);
+      const townPool = TOWN_UPGRADES.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
       const cats = [["mult", 2]];
-      if (wpnElig) cats.push(["weapon", 6]);   // bias toward the COOL weapon drops
-      if (townElig) cats.push(["town", 3]);
+      if (lockedW.length) cats.push(["weapon", 6]);
+      if (townPool.length) cats.push(["town", 3]);
       let total = cats.reduce((a, c) => a + c[1], 0), r = Math.random() * total, pick = cats[0][0];
       for (const c of cats) { if (r < c[1]) { pick = c[0]; break; } r -= c[1]; }
       if (pick === "mult") return mult();
       if (pick === "town") return town();
-      const locked = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave && !this.unlocked[w.id]);
-      const eligible = WEAPONS.filter(w => !w.base && (w.minWave || 1) <= this.wave);
-      const pool = locked.length ? locked : eligible;
-      const w = this._weightedByWave(pool);   // best weapons get likelier as waves climb
-      add({ weapon: w.id }, w.name, w.color);
+      const w = this._weightedPick(lockedW, x => x.minWave);   // progressive: powerful weapons are rare, common ones likely
+      addPod({ weapon: w.id }, w.name, w.color);
     }
 
     // collect a MILITIA upgrade: weapons fill the 4-slot town inventory; RANGE/AMMO enhancers level up (one slot each)
@@ -517,7 +516,7 @@
       if (wasNew) { this.hintArsenal = 5000; this.newWeapon = pu.weapon; this.newWeaponT = 3000; }   // flag the arsenal + pop the big center "NEW WEAPON" banner (3s window to select)
       this.heat[pu.weapon] = 0; this.cdT[pu.weapon] = 0; this.reload[pu.weapon] = 0;
       this.audio.play("extralife");
-      this._toast((auto ? "AUTO-GRAB — " : (wasNew ? "GOT — " : "")) + w.name + "!", true, w.color);
+      this._toast((wasNew ? "GOT — " : "RESTOCKED — ") + w.name + "!", true, w.color);
       if (this.theme.effects.particles) this.particles.emit({ x: pu.x, y: pu.y, count: 26,
         colors: [w.color || this.theme.palette.powerup, this.theme.palette.exhaust, "#ffffff"],
         speedMin: 50, speedMax: 280, gravity: 60, drag: 1, sizeMin: 1.5, sizeMax: 4, lifeMin: 0.4, lifeMax: 1.0, glow: this.theme.effects.glow, shape: "circle", spin: 6 });
@@ -852,13 +851,6 @@
           if (sh.life <= 0) this.bannerShards.splice(i, 1);
         }
       }
-      // gentle reminders "here and there": if you're sitting on a killstreak or a pickup, re-flash its arrow
-      this.remindT -= dt;
-      if (this.remindT <= 0) {
-        this.remindT = 13000;
-        if (this.streaks.length && this.hintStreak <= 0) this.hintStreak = 2400;
-        else if (this.powerups.length && this.hintPow <= 0) this.hintPow = 2400;
-      }
       for (let i = this.toasts.length - 1; i >= 0; i--) if (now - this.toasts[i].born > this.toasts[i].life) this.toasts.splice(i, 1);
 
       for (const w of WEAPONS) {
@@ -879,7 +871,7 @@
       this.aim.y = Math.max(0, Math.min(this.groundY - 4, this.aim.y));
 
       if (this.pending > 0) { this.spawnT -= dt; if (this.spawnT <= 0) { this._spawnEnemy(); this.pending--; this.spawnT = this.spawnGap * rand(0.6, 1.4); } }
-      this.powerupT -= dt; if (this.powerupT <= 0 && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(11000, 17000); }   // paced "bang the drum slowly" — each drop is a noticeable event
+      this.powerupT -= dt; if (this.powerupT <= 0 && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(7000, 12000); }   // a supply pod drops every ~7-12s — a noticeable event you shoot to earn
       if (!this.betweenWaves && this.multishotT > 0) { this.multishotT -= dt; if (this.multishotT <= 0) { this.multishot = 1; this.multishotT = 0; this._toast("MULTI-FIRE OFF"); } }   // don't burn powerup time during the wave breather
       this.ufoT -= dt; if (this.ufoT <= 0 && this.wave >= 2 && this.ufos.length < 1) { this._spawnUfo(); this.ufoT = rand(14000, 24000); }
 
@@ -911,7 +903,16 @@
       }
 
       // powerups wait in the dock's INCOMING slots, ticking down until grabbed (then they quietly expire)
-      if (!this.betweenWaves) for (let i = this.powerups.length - 1; i >= 0; i--) { const pu = this.powerups[i]; pu.t += dt; if (pu.t >= pu.life) { const r = this.pickupSlots[i]; if (r) { pu.x = r.x + r.w / 2; pu.y = r.y + r.h / 2; } this.powerups.splice(i, 1); this._collectPowerup(pu, true); } }   // never waste a drop: if you don't grab it in time, the crew auto-collects it
+      // FALLING SUPPLY PODS: drift down; a blast scoops one up (you earn it by shooting); if it reaches the ground it's LOST
+      if (!this.betweenWaves) for (let i = this.powerups.length - 1; i >= 0; i--) {
+        const pu = this.powerups[i]; pu.t += dt; pu.sway += s * 2;
+        pu.x += (pu.vx + Math.sin(pu.sway) * 14) * s; pu.y += pu.vy * s;
+        if (pu.x < 16) { pu.x = 16; pu.vx = Math.abs(pu.vx); } else if (pu.x > this._w - 16) { pu.x = this._w - 16; pu.vx = -Math.abs(pu.vx); }
+        let got = false;
+        for (const ex of this.explosions) { if (Math.hypot(pu.x - ex.x, pu.y - ex.y) < ex.r + 15) { got = true; break; } }
+        if (got) { this.powerups.splice(i, 1); this._collectPowerup(pu, true); if (this.theme.effects.shake) this._shake(3); continue; }   // shot down -> collected (banner prompts to equip)
+        if (pu.y >= this.groundY - 7) { this.powerups.splice(i, 1); this.audio.play("pill"); this._toast("DROP LOST!", false, "#ff7a7a"); }   // missed it -> gone
+      }
 
       // black holes: vacuum enemies/ufos in, DEVOUR anything that reaches the core, then implode
       const CORE = 46;   // anything sucked this close gets eaten
@@ -1198,6 +1199,7 @@
       for (const m of this.enemies) R.drawEnemy(ctx, th, m);
       for (const u of this.ufos) R.drawUfo(ctx, th, u, now);
       for (const it of this.interceptors) R.drawInterceptor(ctx, th, it);
+      for (const pu of this.powerups) R.drawDrop(ctx, th, pu, now, this.uiScale);   // falling supply pods (shoot to earn)
       for (const ex of this.explosions) R.drawExplosion(ctx, th, ex);
       for (const f of this.fires) R.drawFire(ctx, th, f, now);
       for (const gb of this.napGlobs) R.drawEmber(ctx, th, gb);
@@ -1213,30 +1215,21 @@
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, wave: this.wave, cities: this.cities.filter(c => c.alive).length,
         mult: this.multishot || 1, multFrac: this.multishotT > 0 ? this.multishotT / MULT_DURATION : 0, scale: this.uiScale });
-      // ---- bottom CONTROL DOCK: arsenal · incoming pickups · killstreaks ----
+      // ---- bottom CONTROL DOCK: arsenal · militia · killstreaks (pickups now fall from the sky) ----
       const chips = this.weaponChips.map(ch => { const w = WMAP[ch.id]; const cd = this.cdT[ch.id] || 0; return {
         rect: ch, short: w.short, id: ch.id, color: w.color, locked: !this.unlocked[ch.id], active: this.weapon === ch.id,
         heatFrac: this.heat[ch.id] || 0, cooling: cd > 0, cdFrac: cd > 0 ? (cd / (this.cdMax[ch.id] || w.cd)) : 0,
         reloadFrac: 1 - Math.max(0, this.reload[ch.id] || 0) / (this.reloadMax[ch.id] || w.reload), keyNum: WEAPONS.indexOf(w) + 1 }; });
-      const picks = this.powerups.map((pu, i) => { const tu = pu.town ? TUMAP[pu.town] : null; return { rect: this.pickupSlots[i],
-        weaponId: pu.weapon, townId: pu.town, isMult: pu.kind === "mult", mult: pu.mult, isTown: !!pu.town,
-        color: pu.town ? tu.color : (pu.kind === "mult" ? "#ffd24a" : ((WMAP[pu.weapon] && WMAP[pu.weapon].color) || th.palette.powerup)),
-        label: pu.town ? tu.short : (pu.kind === "mult" ? ("×" + pu.mult) : (WMAP[pu.weapon] ? WMAP[pu.weapon].short : "?")),
-        frac: Math.max(0, 1 - pu.t / pu.life) }; }).filter(p => p.rect);
       const strk = this.streaks.map((id, i) => ({ rect: this.streakSlots[i], id: id, icon: SMAP[id].icon, color: SMAP[id].color,
         name: SMAP[id].name, picked: this._rmbDown && i === this._streakSel })).filter(s => s.rect);
       const militia = this.townUpgrades.map((id, i) => { const u = TUMAP[id]; return { rect: this.militiaSlots[i], id: id, short: u.short, color: u.color,
         lvl: u.kind === "range" ? this.townRangeLvl : (u.kind === "multi" ? this.townMultiLvl : 0) }; }).filter(m => m.rect);
-      // bouncing-arrow cues point at the SPECIFIC new item, not the whole section
-      const newChip = this.hintArsenal > 0 ? chips.find(c => c.id === this.newWeapon) : null;
       R.drawDock(ctx, th, { dockTop: this.dockTop, dockH: this.dockH, w: this._w, now: now, scale: this.uiScale,
-        weapons: chips, pickups: picks, pickupSlots: this.pickupSlots, streaks: strk, streakSlots: this.streakSlots,
+        weapons: chips, streaks: strk, streakSlots: this.streakSlots,
         militia: militia, militiaSlots: this.militiaSlots,
         meter: this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1,
         nextSlot: Math.min(this.streaks.length, STREAK_MAX - 1),
-        hint: { arsenal: this.hintArsenal, arsenalRect: newChip && newChip.rect,
-          pow: this.hintPow, powRect: this.powerups.length ? this.pickupSlots[this.powerups.length - 1] : null,
-          streak: this.hintStreak, streakRect: this.streaks.length ? this.streakSlots[this.streaks.length - 1] : null } });
+        hint: { arsenal: this.hintArsenal } });
       // big center "NEW WEAPON" banner with a 3s window to select it (clickable — see _pd)
       if (this.newWeaponT > 0 && this.newWeapon) {
         const nw = WMAP[this.newWeapon];
