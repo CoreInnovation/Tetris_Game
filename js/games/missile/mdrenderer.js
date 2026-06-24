@@ -485,27 +485,65 @@
       }
       if (anyPicked) { ctx.fillStyle = p.text; ctx.font = "800 9px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("RELEASE TO FIRE", w - 10, top + 13); }
 
-      // ---- attention cues: a ~5s "look here!" highlight when something new lands (subtle but obvious) ----
+      // ---- attention cues: a bouncing little arrow points right AT the new item (subtle but obvious) ----
       const hint = d.hint || {};
-      const cue = (ms, slots, label) => {
-        if (!(ms > 0) || !slots || !slots.length) return;
-        const a = slots[0], b = slots[slots.length - 1], x0 = a.x - 4, x1 = b.x + b.w + 4, cx = (x0 + x1) / 2;
-        const pulse = 0.5 + 0.5 * Math.sin(now / 150), fade = Math.min(1, ms / 700);   // gentle pulse; fade out in the last 0.7s
-        ctx.save(); ctx.globalAlpha = fade;
-        ctx.strokeStyle = rgba(p.accent, 0.45 + 0.45 * pulse); ctx.lineWidth = 2;
-        if (theme.effects.glow) { ctx.shadowBlur = 6 + 12 * pulse; ctx.shadowColor = p.accent; }
-        rr(ctx, x0, a.y - 4, x1 - x0, a.h + 8, 9); ctx.stroke(); ctx.shadowBlur = 0;
-        // bobbing chevron + tiny label above the section
-        const by = a.y - 9 - Math.abs(Math.sin(now / 220)) * 4;
-        ctx.fillStyle = p.accent; ctx.globalAlpha = fade * (0.6 + 0.4 * pulse);
+      const cue = (ms, r, label) => {
+        if (!(ms > 0) || !r) return;
+        const cx = r.x + r.w / 2;
+        const pulse = 0.5 + 0.5 * Math.sin(now / 150), fade = Math.min(1, ms / 700);   // fade out over the last 0.7s
+        const bounce = Math.abs(Math.sin(now / 175)) * 7;   // lively little hop above the tile
+        const ay = r.y - 6 - bounce;   // arrow tip sits just above the tile, bouncing
+        ctx.save();
+        // soft pulse outline on the tile itself
+        ctx.globalAlpha = fade; ctx.strokeStyle = rgba(p.accent, 0.4 + 0.45 * pulse); ctx.lineWidth = 2;
+        if (theme.effects.glow) { ctx.shadowBlur = 5 + 11 * pulse; ctx.shadowColor = p.accent; }
+        rr(ctx, r.x - 3, r.y - 3, r.w + 6, r.h + 6, 9); ctx.stroke();
+        // tiny label
+        ctx.globalAlpha = fade * (0.7 + 0.3 * pulse); ctx.fillStyle = p.accent;
         ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.font = "800 8px " + theme.fonts.ui;
-        ctx.fillText(label, cx, by - 5);
-        ctx.beginPath(); ctx.moveTo(cx - 5, by); ctx.lineTo(cx + 5, by); ctx.lineTo(cx, by + 5); ctx.closePath(); ctx.fill();
+        ctx.fillText(label, cx, ay - 11);
+        // the bouncing downward arrow
+        ctx.beginPath(); ctx.moveTo(cx - 6, ay - 8); ctx.lineTo(cx + 6, ay - 8); ctx.lineTo(cx, ay); ctx.closePath(); ctx.fill();
         ctx.restore();
       };
-      cue(hint.arsenal, d.weapons.map(c => c.rect), "NEW WEAPON");
-      cue(hint.pow, d.pickups.length ? d.pickupSlots : null, "GRAB IT");
-      cue(hint.streak, d.streaks.length ? d.streakSlots.slice(0, d.streaks.length) : null, "READY");
+      cue(hint.arsenal, hint.arsenalRect, "NEW WEAPON");
+      cue(hint.pow, hint.powRect, "GRAB IT");
+      cue(hint.streak, hint.streakRect, "READY");
+      ctx.restore();
+    }
+
+    // Big center-top "NEW WEAPON" banner — prominent but compact, with a countdown
+    // bar for the select window. Fades in fast, holds, fades out at the end.
+    drawNewWeaponBanner(ctx, theme, d) {
+      const p = theme.palette, w = this.w, col = d.color || p.accent;
+      const bw = Math.min(330, w - 36), bh = 56;
+      const bx = (w - bw) / 2, by = Math.max(48, this.h * 0.11);
+      const t = Math.max(0, Math.min(1, d.frac));          // 1 -> 0
+      const a = Math.max(0, Math.min(1, Math.min((1 - t) / 0.07, t / 0.16)));   // fade in first ~7%, out last ~16%
+      if (a <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = a;
+      // panel
+      ctx.fillStyle = rgba("#0b1018", 0.9); rr(ctx, bx, by, bw, bh, 12); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = col;
+      if (theme.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = col; }
+      rr(ctx, bx, by, bw, bh, 12); ctx.stroke(); ctx.shadowBlur = 0;
+      // weapon icon
+      this.drawWeaponIcon(ctx, d.id, bx + 30, by + bh / 2 - 3, 22, col);
+      // labels
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = rgba(p.textDim, 0.95); ctx.font = "800 10px " + theme.fonts.ui;
+      ctx.fillText("NEW WEAPON", bx + 56, by + 21);
+      ctx.fillStyle = col; ctx.font = "900 19px " + theme.fonts.ui;
+      if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = col; }
+      ctx.fillText(d.name, bx + 56, by + 41); ctx.shadowBlur = 0;
+      // select hint (or EQUIPPED tick if it's already the active weapon)
+      ctx.textAlign = "right"; ctx.font = "700 9px " + theme.fonts.ui;
+      if (d.active) { ctx.fillStyle = "#9aff8a"; ctx.fillText("EQUIPPED ✓", bx + bw - 12, by + 18); }
+      else { ctx.fillStyle = rgba(p.textDim, 0.85); ctx.fillText(d.keyNum <= 9 ? ("PRESS " + d.keyNum + " · OR TAP ARSENAL") : "TAP ARSENAL TO EQUIP", bx + bw - 12, by + 18); }
+      // countdown bar
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx + 12, by + bh - 9, bw - 24, 3);
+      ctx.fillStyle = col; ctx.fillRect(bx + 12, by + bh - 9, (bw - 24) * t, 3);
       ctx.restore();
     }
 

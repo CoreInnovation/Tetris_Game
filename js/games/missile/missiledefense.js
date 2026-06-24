@@ -182,6 +182,7 @@
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0; this.armyCdT = 0;
       this.statKills = {}; this.statPow = {};   // balance instrumentation: kills by source + powerup spawns by id/category
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
+      this.newWeapon = null; this.newWeaponT = 0;   // big center "NEW WEAPON" banner: id + ms window to select it
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(4000, 7000); this.ufoT = rand(11000, 17000);
@@ -474,7 +475,7 @@
       }
       const w = WMAP[pu.weapon], wasNew = !this.collected.includes(pu.weapon);
       this._collectWeapon(pu.weapon, auto);   // adds to the 4-slot inventory; manual grab also equips it (auto-grab keeps your current weapon)
-      if (wasNew) this.hintArsenal = 5000;     // flag the arsenal so the player notices a new weapon to select
+      if (wasNew) { this.hintArsenal = 5000; this.newWeapon = pu.weapon; this.newWeaponT = 3000; }   // flag the arsenal + pop the big center "NEW WEAPON" banner (3s window to select)
       this.heat[pu.weapon] = 0; this.cdT[pu.weapon] = 0; this.reload[pu.weapon] = 0;
       this.audio.play("extralife");
       this._toast((auto ? "AUTO-GRAB — " : (wasNew ? "GOT — " : "")) + w.name + "!", true, w.color);
@@ -773,6 +774,7 @@
       if (this.hintPow > 0) this.hintPow -= dt;        // ~5s "look here!" cues on the dock (tick even between waves)
       if (this.hintStreak > 0) this.hintStreak -= dt;
       if (this.hintArsenal > 0) this.hintArsenal -= dt;
+      if (this.newWeaponT > 0) { this.newWeaponT -= dt; if (this.newWeaponT <= 0) this.newWeapon = null; }   // big banner window
       for (let i = this.toasts.length - 1; i >= 0; i--) if (now - this.toasts[i].born > this.toasts[i].life) this.toasts.splice(i, 1);
 
       for (const w of WEAPONS) {
@@ -1134,12 +1136,22 @@
         name: SMAP[id].name, picked: this._rmbDown && i === this._streakSel })).filter(s => s.rect);
       const militia = this.townUpgrades.map((id, i) => { const u = TUMAP[id]; return { rect: this.militiaSlots[i], id: id, short: u.short, color: u.color,
         lvl: u.kind === "range" ? this.townRangeLvl : (u.kind === "multi" ? this.townMultiLvl : 0) }; }).filter(m => m.rect);
+      // bouncing-arrow cues point at the SPECIFIC new item, not the whole section
+      const newChip = this.hintArsenal > 0 ? chips.find(c => c.id === this.newWeapon) : null;
       R.drawDock(ctx, th, { dockTop: this.dockTop, dockH: this.dockH, w: this._w, now: now,
         weapons: chips, pickups: picks, pickupSlots: this.pickupSlots, streaks: strk, streakSlots: this.streakSlots,
         militia: militia, militiaSlots: this.militiaSlots,
         meter: this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1,
         nextSlot: Math.min(this.streaks.length, STREAK_MAX - 1),
-        hint: { arsenal: this.hintArsenal, pow: this.hintPow, streak: this.hintStreak } });
+        hint: { arsenal: this.hintArsenal, arsenalRect: newChip && newChip.rect,
+          pow: this.hintPow, powRect: this.powerups.length ? this.pickupSlots[this.powerups.length - 1] : null,
+          streak: this.hintStreak, streakRect: this.streaks.length ? this.streakSlots[this.streaks.length - 1] : null } });
+      // big center "NEW WEAPON" banner with a 3s window to select it
+      if (this.newWeaponT > 0 && this.newWeapon) {
+        const nw = WMAP[this.newWeapon];
+        R.drawNewWeaponBanner(ctx, th, { id: this.newWeapon, name: nw.name, color: nw.color || th.palette.accent,
+          frac: Math.max(0, this.newWeaponT / 3000), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon });
+      }
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }
