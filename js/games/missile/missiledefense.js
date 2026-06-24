@@ -15,6 +15,7 @@
   const EJECT_V = 235, COLD_G = 540, EJECT_DELAY = 0.45;
   const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9, SEEK_REACH = 200;
   const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000;
+  const ARMY_RANGE = 300;   // soldiers at a battery only open up when a threat is actually within reach (not always blasting)
   const HORNET_SPEED = 430, HORNET_TURN = 6.5, BH_PULL = 340, ZIG_AMP = 48;   // hornets nerfed: slower + lazier tracking
   const DOCK_H = 120, POWERUP_LIFE = 16000, POWERUP_SLOTS = 3;   // two-row dock + how long a pickup LINGERS (longer so you actually see/grab it)
   // Screen-shake is tuned GENTLE: every _shake() request is scaled down and hard-capped, and it
@@ -182,7 +183,7 @@
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0; this.armyCdT = 0;
       this.statKills = {}; this.statPow = {};   // balance instrumentation: kills by source + powerup spawns by id/category
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
-      this.newWeapon = null; this.newWeaponT = 0; this._bannerRect = null;   // big center "NEW WEAPON" banner: id + ms window + clickable rect
+      this.newWeapon = null; this.newWeaponT = 0; this._bannerRect = null; this._bannerPop = 0;   // big center "NEW WEAPON" banner: id + ms window + clickable rect + click-pop anim
       this.remindT = 13000;   // gentle periodic "you have stuff to use" reminder
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
@@ -265,7 +266,7 @@
         }
         if (e.button !== 0 && e.button !== undefined) return;   // ignore middle/extra buttons
         const p = toLocal(e), inR = (r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
-        if (this.newWeaponT > 0 && this._bannerRect && this.newWeapon && inR(this._bannerRect)) { this._selectWeapon(this.newWeapon); return; }   // click the big NEW WEAPON banner -> equip it
+        if (this.newWeaponT > 0 && this._bannerRect && this.newWeapon && inR(this._bannerRect)) { this._selectWeapon(this.newWeapon); this._bannerBoom(); return; }   // click the big NEW WEAPON banner -> equip it + pop/explode
         for (const ch of this.weaponChips) { if (inR(ch)) { this._selectWeapon(ch.id); return; } }   // ARSENAL — pick a weapon
         for (let k = 0; k < this.powerups.length && k < this.pickupSlots.length; k++) { if (inR(this.pickupSlots[k])) { const r = this.pickupSlots[k], pu = this.powerups.splice(k, 1)[0]; pu.x = r.x + r.w / 2; pu.y = r.y + r.h / 2; this._collectPowerup(pu); return; } }   // INCOMING — grab a pickup
         for (let k = 0; k < this.streaks.length && k < this.streakSlots.length; k++) { if (inR(this.streakSlots[k])) { this._useStreak(k); return; } }   // KILLSTREAKS — unleash one
@@ -290,6 +291,17 @@
     }
 
     _selectWeapon(id) { if (id && this.unlocked[id]) { this.weapon = id; this.audio.play("select"); } else this.audio.play("pill"); }
+
+    // satisfying confirmation when you click the NEW WEAPON banner: it pops + explodes so you KNOW it's selected
+    _bannerBoom() {
+      const r = this._bannerRect; if (!r) return;
+      const cx = r.x + r.w / 2, cy = r.y + r.h / 2, col = (WMAP[this.newWeapon] && WMAP[this.newWeapon].color) || this.theme.palette.accent;
+      this._bannerPop = 1;
+      this.audio.play("extralife");
+      if (this.theme.effects.shake) this._shake(7);
+      if (this.theme.effects.particles) this.particles.emit({ x: cx, y: cy, count: 48, colors: [col, "#ffffff", "#ffe14a"],
+        speedMin: 90, speedMax: 480, gravity: 140, drag: 0.9, sizeMin: 1.5, sizeMax: 5, lifeMin: 0.4, lifeMax: 1.1, glow: this.theme.effects.glow, shape: "circle", spin: 8 });
+    }
     _unlockedIds() { return WEAPONS.filter(w => this.unlocked[w.id]).map(w => w.id); }
     _nextUnlocked() { const u = this._unlockedIds(); return u[(u.indexOf(this.weapon) + 1) % u.length]; }
     _prevUnlocked() { const u = this._unlockedIds(); return u[(u.indexOf(this.weapon) - 1 + u.length) % u.length]; }
@@ -524,7 +536,7 @@
     _townFire(cx, id, rangeMul, extraShots) {
       const u = TUMAP[id], by = this.groundY - 9, col = u.color, range = (u.range || 320) * rangeMul;
       const tgt = this._townNearest(cx, by, range);
-      if (!tgt && id !== "molotov") return false;   // need something in reach (molotov can still lob at the nearest threat)
+      if (!tgt) return false;   // ALL town weapons need a threat actually within reach (no firing into empty sky)
       this.audio.play(u.sfx);
       if (this.theme.effects.particles) this.particles.emit({ x: cx, y: by, count: 5, colors: [col, "#ffffff"], speedMin: 30, speedMax: 150, angleMin: -Math.PI * 0.85, angleMax: -Math.PI * 0.15, gravity: 120, drag: 1.2, sizeMin: 1.4, sizeMax: 3, lifeMin: 0.15, lifeMax: 0.4, glow: this.theme.effects.glow, shape: "circle" });
       if (id === "buckshot") {
@@ -787,6 +799,7 @@
       if (this.hintStreak > 0) this.hintStreak -= dt;
       if (this.hintArsenal > 0) this.hintArsenal -= dt;
       if (this.newWeaponT > 0) { this.newWeaponT -= dt; if (this.newWeaponT <= 0) this.newWeapon = null; }   // big banner window
+      if (this._bannerPop > 0) { this._bannerPop -= dt / 240; if (this._bannerPop < 0) this._bannerPop = 0; }   // click-pop decay
       // gentle reminders "here and there": if you're sitting on a killstreak or a pickup, re-flash its arrow
       this.remindT -= dt;
       if (this.remindT <= 0) {
@@ -1031,8 +1044,8 @@
         c.panic = this.enemies.some(m => Math.hypot(m.x - c.x, m.y - this.groundY) < PANIC_DIST);
         if (c.panic) { anyPanic = true; if (this.enemies.length && this.tracers.length < 64 && Math.random() < dt / 150) this._spawnTracer(c.x); }   // panicking folks plink away (harmless)
       }
-      // ARMY at the firing bases: stationed soldiers lay down OCCASIONAL covering fire (support, not a carry)
-      if (this.enemies.length) for (const b of this.batteries) { if (b.alive && this.tracers.length < 80 && Math.random() < dt / 360) this._spawnSoldierTracer(b.x); }
+      // ARMY at the firing bases: stationed soldiers lay down OCCASIONAL covering fire — ONLY when a threat is within reach
+      if (this.enemies.length) for (const b of this.batteries) { if (b.alive && this.tracers.length < 80 && Math.random() < dt / 360 && this._townNearest(b.x, this.groundY - 12, ARMY_RANGE)) this._spawnSoldierTracer(b.x); }
       if (this.peopleCdT > 0) this.peopleCdT -= dt;
       if (this.armyCdT > 0) this.armyCdT -= dt;
       for (let i = this.tracers.length - 1; i >= 0; i--) {
@@ -1059,7 +1072,13 @@
           const alive = this.cities.filter(c => c.alive);
           if (alive.length) {
             const volleys = 1 + Math.floor(this.townMultiLvl / 3);   // AMMO CRATE: more cities open up at once
-            for (let v = 0; v < volleys; v++) { const c = alive[(Math.random() * alive.length) | 0]; const wid = townWeapons[(Math.random() * townWeapons.length) | 0]; this._townFire(c.x, wid, rangeMul, 0); }
+            for (let v = 0; v < volleys; v++) {
+              const wid = townWeapons[(Math.random() * townWeapons.length) | 0];
+              const reach = (TUMAP[wid].range || 320) * rangeMul;
+              const inRange = alive.filter(c => this._townNearest(c.x, this.groundY - 9, reach));   // only cities with a threat actually in reach fire
+              if (!inRange.length) continue;   // nothing close enough -> hold fire (keeps it fun)
+              this._townFire(inRange[(Math.random() * inRange.length) | 0].x, wid, rangeMul, 0);
+            }
           }
         }
       }
@@ -1170,7 +1189,8 @@
       if (this.newWeaponT > 0 && this.newWeapon) {
         const nw = WMAP[this.newWeapon];
         this._bannerRect = R.drawNewWeaponBanner(ctx, th, { id: this.newWeapon, name: nw.name, color: nw.color || th.palette.accent,
-          frac: Math.max(0, this.newWeaponT / 3000), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon, scale: this.uiScale });
+          frac: Math.max(0, this.newWeaponT / 3000), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon,
+          scale: this.uiScale, now: now, pop: this._bannerPop });
       } else this._bannerRect = null;
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette; ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
