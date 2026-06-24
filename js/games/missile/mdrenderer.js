@@ -399,6 +399,7 @@
     // the whole bottom CONTROL DOCK: panel + ARSENAL · INCOMING · KILLSTREAKS
     drawDock(ctx, theme, d) {
       const p = theme.palette, w = d.w, top = d.dockTop, h = d.dockH, now = d.now || 0;
+      const s = d.scale || 1, fs = (px) => Math.round(px * s);   // resolution-aware sizing so the dock isn't lost on big screens
       ctx.save();
       // panel background
       const g = ctx.createLinearGradient(0, top, 0, top + h);
@@ -407,8 +408,8 @@
       ctx.strokeStyle = rgba(p.accent, 0.7); ctx.lineWidth = 2; if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = p.accent; }
       ctx.beginPath(); ctx.moveTo(0, top + 1); ctx.lineTo(w, top + 1); ctx.stroke(); ctx.shadowBlur = 0;
       // captions (each sits just above its row)
-      ctx.textBaseline = "alphabetic"; ctx.fillStyle = rgba(p.textDim, 0.85); ctx.font = "700 9px " + theme.fonts.ui; ctx.textAlign = "left";
-      const cap = (txt, slot) => { if (slot) ctx.fillText(txt, slot.x + 1, slot.y - 4); };
+      ctx.textBaseline = "alphabetic"; ctx.fillStyle = rgba(p.textDim, 0.85); ctx.font = "700 " + fs(9) + "px " + theme.fonts.ui; ctx.textAlign = "left";
+      const cap = (txt, slot) => { if (slot) ctx.fillText(txt, slot.x + 1, slot.y - fs(4)); };
       if (d.weapons.length) cap("ARSENAL", d.weapons[0].rect);
       cap("INCOMING", d.pickupSlots[0]);
       cap("MILITIA", d.militiaSlots && d.militiaSlots[0]);
@@ -421,33 +422,33 @@
         this._dockTile(ctx, theme, r, borderCol, { dim: c.locked, lw: (c.active || c.cooling) ? 2.2 : 1.2,
           glow: c.active ? 10 : 0, tint: c.cooling ? "rgba(255,72,72,0.16)" : (c.active ? rgba(p.accent, 0.08) : null) });
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        if (c.locked) { ctx.fillStyle = p.textDim; ctx.font = "700 16px " + theme.fonts.ui; ctx.fillText("?", r.x + r.w / 2, r.y + r.h / 2); continue; }
-        this.drawWeaponIcon(ctx, c.id, r.x + r.w / 2, r.y + 19, 17, col);
-        ctx.fillStyle = c.active ? p.text : p.textDim; ctx.font = "700 9px " + theme.fonts.ui;
-        ctx.fillText(c.short, r.x + r.w / 2, r.y + r.h - 16);
-        if (c.keyNum <= 9) { ctx.fillStyle = rgba(p.textDim, 0.8); ctx.font = "600 8px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillText(String(c.keyNum), r.x + r.w - 5, r.y + 4); }   // only 1-9 have a digit hotkey
-        const bw = r.w - 12, bx = r.x + 6, byb = r.y + r.h - 8;
-        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, 3);
-        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.cdFrac)), 3); }
-        else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.heatFrac)), 3); }
-        if (c.active && !c.cooling) { ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb - 4, bw, 2); ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7); ctx.fillRect(bx, byb - 4, bw * Math.max(0, Math.min(1, c.reloadFrac)), 2); }
-        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "800 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + 13); }
+        if (c.locked) { ctx.fillStyle = p.textDim; ctx.font = "700 " + fs(16) + "px " + theme.fonts.ui; ctx.fillText("?", r.x + r.w / 2, r.y + r.h / 2); continue; }
+        this.drawWeaponIcon(ctx, c.id, r.x + r.w / 2, r.y + r.h * 0.46, fs(17), col);
+        ctx.fillStyle = c.active ? p.text : p.textDim; ctx.font = "700 " + fs(9) + "px " + theme.fonts.ui;
+        ctx.fillText(c.short, r.x + r.w / 2, r.y + r.h - fs(15));
+        if (c.keyNum <= 9) { ctx.fillStyle = rgba(p.textDim, 0.8); ctx.font = "600 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillText(String(c.keyNum), r.x + r.w - fs(5), r.y + fs(4)); }   // only 1-9 have a digit hotkey
+        const bw = r.w - fs(12), bx = r.x + fs(6), byb = r.y + r.h - fs(8), bh3 = Math.max(2, fs(3));
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, bh3);
+        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.cdFrac)), bh3); }
+        else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.heatFrac)), bh3); }
+        if (c.active && !c.cooling) { const rh = Math.max(2, fs(2)); ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb - rh - 2, bw, rh); ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7); ctx.fillRect(bx, byb - rh - 2, bw * Math.max(0, Math.min(1, c.reloadFrac)), rh); }
+        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "800 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + fs(13)); }
       }
 
-      // ---- INCOMING pickups (empty-slot outlines, then any waiting pickups) ----
+      // ---- INCOMING pickups (empty-slot outlines, then any waiting pickups; clickable -> pulse hard) ----
       for (const r of d.pickupSlots) { ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore(); }
       for (const pk of d.pickups) {
-        const r = pk.rect, col = pk.color, pulse = 0.65 + 0.35 * Math.sin(now / 140 + r.x);
-        this._dockTile(ctx, theme, r, col, { lw: 2, glow: 8 + 8 * pulse, tint: rgba(col, 0.12 + 0.1 * pulse) });
+        const r = pk.rect, col = pk.color, pulse = 0.5 + 0.5 * Math.sin(now / 130 + r.x);   // a clickable pickup breathes so you notice you can grab it
+        this._dockTile(ctx, theme, r, col, { lw: 2 + pulse, glow: 8 + 14 * pulse, tint: rgba(col, 0.14 + 0.16 * pulse) });
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        if (pk.isMult) { ctx.fillStyle = "#fff7e0"; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; } ctx.font = "900 18px " + theme.fonts.ui; ctx.fillText("×" + pk.mult, r.x + r.w / 2, r.y + 18); ctx.shadowBlur = 0; }
-        else if (pk.isTown) this.drawTownIcon(ctx, pk.townId, r.x + r.w / 2, r.y + 17, 17, col);
-        else this.drawWeaponIcon(ctx, pk.weaponId, r.x + r.w / 2, r.y + 17, 17, col);
-        if (pk.isTown) this._personBadge(ctx, r.x + r.w - 9, r.y + r.h - 18, 9, col);   // marks this pickup as FOR THE TOWNSFOLK
-        ctx.fillStyle = col; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(pk.isTown ? "TOWN" : "GRAB", r.x + r.w / 2, r.y + r.h - 14);
-        const bw = r.w - 12, bx = r.x + 6, byb = r.y + r.h - 7;   // life-left bar
-        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, 3);
-        ctx.fillStyle = col; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, pk.frac)), 3);
+        if (pk.isMult) { ctx.fillStyle = "#fff7e0"; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; } ctx.font = "900 " + fs(18) + "px " + theme.fonts.ui; ctx.fillText("×" + pk.mult, r.x + r.w / 2, r.y + r.h * 0.44); ctx.shadowBlur = 0; }
+        else if (pk.isTown) this.drawTownIcon(ctx, pk.townId, r.x + r.w / 2, r.y + r.h * 0.42, fs(17), col);
+        else this.drawWeaponIcon(ctx, pk.weaponId, r.x + r.w / 2, r.y + r.h * 0.42, fs(17), col);
+        if (pk.isTown) this._personBadge(ctx, r.x + r.w - fs(9), r.y + r.h - fs(17), fs(9), col);   // marks this pickup as FOR THE TOWNSFOLK
+        ctx.fillStyle = col; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(pk.isTown ? "TOWN" : "GRAB", r.x + r.w / 2, r.y + r.h - fs(13));
+        const bw = r.w - fs(12), bx = r.x + fs(6), byb = r.y + r.h - fs(7), bh3 = Math.max(2, fs(3));   // life-left bar
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, bh3);
+        ctx.fillStyle = col; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, pk.frac)), bh3);
       }
 
       // ---- MILITIA (townsfolk upgrades — display only; person-marked) ----
@@ -456,12 +457,12 @@
         for (const mu of (d.militia || [])) {
           const r = mu.rect, col = mu.color;
           this._dockTile(ctx, theme, r, col, { lw: 1.6, glow: 7, tint: rgba(col, 0.14) });
-          this.drawTownIcon(ctx, mu.id, r.x + r.w / 2, r.y + 16, 16, col);
-          this._personBadge(ctx, r.x + r.w - 9, r.y + 9, 8, col);
-          ctx.fillStyle = col; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(mu.short, r.x + r.w / 2, r.y + r.h - 13);
+          this.drawTownIcon(ctx, mu.id, r.x + r.w / 2, r.y + r.h * 0.42, fs(16), col);
+          this._personBadge(ctx, r.x + r.w - fs(9), r.y + fs(9), fs(8), col);
+          ctx.fillStyle = col; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(mu.short, r.x + r.w / 2, r.y + r.h - fs(12));
           if (mu.lvl > 1) {   // enhancer level pips
-            const pips = Math.min(4, mu.lvl), pw = 5, tot = pips * pw + (pips - 1) * 2, bx = r.x + (r.w - tot) / 2, by = r.y + r.h - 5;
-            for (let k = 0; k < pips; k++) { ctx.fillStyle = col; ctx.fillRect(bx + k * (pw + 2), by, pw, 2); }
+            const pips = Math.min(4, mu.lvl), pw = fs(5), tot = pips * pw + (pips - 1) * 2, bx = r.x + (r.w - tot) / 2, by = r.y + r.h - fs(5);
+            for (let k = 0; k < pips; k++) { ctx.fillStyle = col; ctx.fillRect(bx + k * (pw + 2), by, pw, Math.max(2, fs(2))); }
           }
         }
       }
@@ -471,19 +472,30 @@
         const r = d.streakSlots[i]; ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore();
         if (i === d.nextSlot && d.streaks.length < d.streakSlots.length) {   // charge meter fills the next empty slot
           const m = Math.max(0, Math.min(1, d.meter)); ctx.fillStyle = rgba(p.accent, 0.16); rr(ctx, r.x, r.y + r.h * (1 - m), r.w, r.h * m, 7); ctx.fill();
-          ctx.fillStyle = rgba(p.accent, 0.7); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "800 9px " + theme.fonts.ui; ctx.fillText(Math.round(m * 100) + "%", r.x + r.w / 2, r.y + r.h / 2);
+          ctx.fillStyle = rgba(p.accent, 0.7); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.fillText(Math.round(m * 100) + "%", r.x + r.w / 2, r.y + r.h / 2);
         }
       }
       let anyPicked = false;
-      for (const sk of d.streaks) {
-        const r = sk.rect, picked = sk.picked; if (picked) anyPicked = true;
-        this._dockTile(ctx, theme, r, picked ? "#ffffff" : sk.color, { lw: picked ? 3 : 2, glow: picked ? 18 : 10, tint: rgba(sk.color, picked ? 0.34 : 0.16) });
-        this.drawStreakIcon(ctx, sk.id, r.x + r.w / 2, r.y + 20, 20, picked ? "#ffffff" : sk.color);
-        ctx.fillStyle = picked ? "#fff" : sk.color; ctx.font = "700 8px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(sk.name.split(" ")[0], r.x + r.w / 2, r.y + r.h - 14);
-        if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 9px " + theme.fonts.ui; ctx.fillText("▲", r.x + r.w / 2, r.y - 7); }
+      // ready killstreaks PULSE strongly + carry a bouncing arrow — they SHOULD be pressed (R / tap)
+      const kpulse = 0.5 + 0.5 * Math.sin(now / 260);
+      for (let si = 0; si < d.streaks.length; si++) {
+        const sk = d.streaks[si], r = sk.rect, picked = sk.picked; if (picked) anyPicked = true;
+        const glow = picked ? 20 : (10 + 14 * kpulse), lw = picked ? 3 : (2 + 1.4 * kpulse);
+        this._dockTile(ctx, theme, r, picked ? "#ffffff" : sk.color, { lw: lw, glow: glow, tint: rgba(sk.color, picked ? 0.34 : (0.16 + 0.16 * kpulse)) });
+        this.drawStreakIcon(ctx, sk.id, r.x + r.w / 2, r.y + r.h * 0.48, fs(20), picked ? "#ffffff" : sk.color);
+        ctx.fillStyle = picked ? "#fff" : sk.color; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(sk.name.split(" ")[0], r.x + r.w / 2, r.y + r.h - fs(13));
+        if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.fillText("▲", r.x + r.w / 2, r.y - fs(7)); }
+        else if (si === 0) {   // gentle persistent "press me" arrow over the streak R fires
+          const bounce = Math.abs(Math.sin(now / 230)) * fs(5);
+          ctx.save(); ctx.globalAlpha = 0.55 + 0.45 * kpulse; ctx.fillStyle = sk.color;
+          if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = sk.color; }
+          const ay = r.y - fs(5) - bounce, aw = fs(6);
+          ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - aw, ay - fs(7)); ctx.lineTo(r.x + r.w / 2 + aw, ay - fs(7)); ctx.lineTo(r.x + r.w / 2, ay); ctx.closePath(); ctx.fill();
+          ctx.restore();
+        }
       }
-      if (anyPicked) { ctx.fillStyle = p.text; ctx.font = "800 9px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("RELEASE TO FIRE", w - 10, top + 13); }
+      if (anyPicked) { ctx.fillStyle = p.text; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("RELEASE TO FIRE", w - fs(10), top + fs(13)); }
 
       // ---- attention cues: a bouncing little arrow points right AT the new item (subtle but obvious) ----
       const hint = d.hint || {};
@@ -491,8 +503,8 @@
         if (!(ms > 0) || !r) return;
         const cx = r.x + r.w / 2;
         const pulse = 0.5 + 0.5 * Math.sin(now / 150), fade = Math.min(1, ms / 700);   // fade out over the last 0.7s
-        const bounce = Math.abs(Math.sin(now / 175)) * 7;   // lively little hop above the tile
-        const ay = r.y - 6 - bounce;   // arrow tip sits just above the tile, bouncing
+        const bounce = Math.abs(Math.sin(now / 175)) * fs(7);   // lively little hop above the tile
+        const ay = r.y - fs(6) - bounce;   // arrow tip sits just above the tile, bouncing
         ctx.save();
         // soft pulse outline on the tile itself
         ctx.globalAlpha = fade; ctx.strokeStyle = rgba(p.accent, 0.4 + 0.45 * pulse); ctx.lineWidth = 2;
@@ -500,10 +512,10 @@
         rr(ctx, r.x - 3, r.y - 3, r.w + 6, r.h + 6, 9); ctx.stroke();
         // tiny label
         ctx.globalAlpha = fade * (0.7 + 0.3 * pulse); ctx.fillStyle = p.accent;
-        ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.font = "800 8px " + theme.fonts.ui;
-        ctx.fillText(label, cx, ay - 11);
+        ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.font = "800 " + fs(8) + "px " + theme.fonts.ui;
+        ctx.fillText(label, cx, ay - fs(11));
         // the bouncing downward arrow
-        ctx.beginPath(); ctx.moveTo(cx - 6, ay - 8); ctx.lineTo(cx + 6, ay - 8); ctx.lineTo(cx, ay); ctx.closePath(); ctx.fill();
+        const aw = fs(6); ctx.beginPath(); ctx.moveTo(cx - aw, ay - fs(8)); ctx.lineTo(cx + aw, ay - fs(8)); ctx.lineTo(cx, ay); ctx.closePath(); ctx.fill();
         ctx.restore();
       };
       cue(hint.arsenal, hint.arsenalRect, "NEW WEAPON");
@@ -582,22 +594,22 @@
     }
 
     drawHUD(ctx, theme, data) {
-      const p = theme.palette;
+      const p = theme.palette, s = data.scale || 1, fs = (px) => Math.round(px * s);
       ctx.save();
       ctx.fillStyle = p.text; ctx.textBaseline = "top";
       this._glow(ctx, theme, p.accent, theme.effects.glow ? 8 : 0);
-      ctx.font = "800 24px " + theme.fonts.ui; ctx.textAlign = "left";
-      ctx.fillText(String(data.score).padStart(6, "0"), 18, 14);
-      ctx.shadowBlur = 0; ctx.font = "600 13px " + theme.fonts.ui; ctx.fillStyle = p.textDim;
+      ctx.font = "800 " + fs(24) + "px " + theme.fonts.ui; ctx.textAlign = "left";
+      ctx.fillText(String(data.score).padStart(6, "0"), fs(18), fs(14));
+      ctx.shadowBlur = 0; ctx.font = "600 " + fs(13) + "px " + theme.fonts.ui; ctx.fillStyle = p.textDim;
       ctx.textAlign = "right";
-      ctx.fillText("WAVE " + data.wave + "   CITIES " + data.cities, this.w - 18, 18);
+      ctx.fillText("WAVE " + data.wave + "   CITIES " + data.cities, this.w - fs(18), fs(18));
       if (data.mult > 1) {   // active multi-fire badge + countdown bar, centered in the clear top strip
-        const gold = "#ffd24a", cx = this.w / 2;
+        const gold = "#ffd24a", cx = this.w / 2, bw = fs(130);
         this._glow(ctx, theme, gold, theme.effects.glow ? 8 : 0);
-        ctx.fillStyle = gold; ctx.font = "900 15px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "top";
-        ctx.fillText("×" + data.mult + " MULTI-FIRE", cx, 12); ctx.shadowBlur = 0;
-        ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(cx - 65, 31, 130, 4);
-        ctx.fillStyle = gold; ctx.fillRect(cx - 65, 31, 130 * Math.max(0, Math.min(1, data.multFrac)), 4);
+        ctx.fillStyle = gold; ctx.font = "900 " + fs(15) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "top";
+        ctx.fillText("×" + data.mult + " MULTI-FIRE", cx, fs(12)); ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(cx - bw / 2, fs(31), bw, fs(4));
+        ctx.fillStyle = gold; ctx.fillRect(cx - bw / 2, fs(31), bw * Math.max(0, Math.min(1, data.multFrac)), fs(4));
       }
       ctx.restore();
     }

@@ -183,6 +183,7 @@
       this.statKills = {}; this.statPow = {};   // balance instrumentation: kills by source + powerup spawns by id/category
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
       this.newWeapon = null; this.newWeaponT = 0;   // big center "NEW WEAPON" banner: id + ms window to select it
+      this.remindT = 13000;   // gentle periodic "you have stuff to use" reminder
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(4000, 7000); this.ufoT = rand(11000, 17000);
@@ -293,7 +294,9 @@
     _prevUnlocked() { const u = this._unlockedIds(); return u[(u.indexOf(this.weapon) - 1 + u.length) % u.length]; }
 
     _layout(w, h) {
-      this.dockH = DOCK_H;
+      // resolution-aware UI scale so the dock/HUD aren't lost in the sauce on big screens (capped so it stays balanced)
+      this.uiScale = Math.max(1, Math.min(1.7, Math.min(w / 1100, h / 640)));
+      this.dockH = Math.round(DOCK_H * this.uiScale);
       this.dockTop = h - this.dockH;
       this.groundY = this.dockTop - 12;   // thin ground strip sits just above the control dock
       const slotW = (w - 56) / 9, sx = i => 28 + slotW * (i + 0.5);
@@ -308,9 +311,10 @@
     //   row 2:  MILITIA (townsfolk upgrades, left)   ·   KILLSTREAKS (right)
     // Lays out clickable rects for weapons/pickups/streaks; militia tiles are display-only.
     _layoutDock() {
-      const w = this._w || 800, pad = 10, gap = 6, labelH = 12, tileH = 38;
-      const row1Y = this.dockTop + labelH + 4;            // dockTop + 16
-      const row2Y = row1Y + tileH + labelH + 4;           // dockTop + 70
+      const s = this.uiScale || 1;
+      const w = this._w || 800, pad = Math.round(10 * s), gap = Math.round(6 * s), labelH = Math.round(12 * s), tileH = Math.round(38 * s);
+      const row1Y = this.dockTop + labelH + Math.round(4 * s);
+      const row2Y = row1Y + tileH + labelH + Math.round(4 * s);
       // right column width is governed by the widest right block (killstreaks)
       const sTile = tileH, streakBlockW = STREAK_MAX * sTile + (STREAK_MAX - 1) * gap;
       const rightLeft = w - pad - streakBlockW;
@@ -326,8 +330,8 @@
       for (let i = 0; i < TOWN_MAX; i++) this.militiaSlots.push({ x: pad + i * (mTile + gap), y: row2Y, w: mTile, h: tileH });
       // ARSENAL — your held weapons fill row 1 left (dev shows all), bounded by the INCOMING block
       const ids = this.dev ? WEAPONS.map(wp => wp.id) : (this.collected ? this.collected.slice() : ["interceptor"]);
-      const n = Math.max(1, ids.length), wLeft = pad, wRight = pickLeft - 14, avail = Math.max(120, wRight - wLeft);
-      const cw = Math.max(34, Math.min(96, Math.floor((avail - (n - 1) * gap) / n)));
+      const n = Math.max(1, ids.length), wLeft = pad, wRight = pickLeft - Math.round(14 * s), avail = Math.max(120 * s, wRight - wLeft);
+      const cw = Math.max(Math.round(34 * s), Math.min(Math.round(96 * s), Math.floor((avail - (n - 1) * gap) / n)));
       this.weaponChips = ids.map((id, i) => ({ id: id, x: wLeft + i * (cw + gap), y: row1Y, w: cw, h: tileH }));
     }
     _layoutChips() { this._layoutDock(); }   // legacy alias (dev toggle / collect calls)
@@ -775,6 +779,13 @@
       if (this.hintStreak > 0) this.hintStreak -= dt;
       if (this.hintArsenal > 0) this.hintArsenal -= dt;
       if (this.newWeaponT > 0) { this.newWeaponT -= dt; if (this.newWeaponT <= 0) this.newWeapon = null; }   // big banner window
+      // gentle reminders "here and there": if you're sitting on a killstreak or a pickup, re-flash its arrow
+      this.remindT -= dt;
+      if (this.remindT <= 0) {
+        this.remindT = 13000;
+        if (this.streaks.length && this.hintStreak <= 0) this.hintStreak = 2400;
+        else if (this.powerups.length && this.hintPow <= 0) this.hintPow = 2400;
+      }
       for (let i = this.toasts.length - 1; i >= 0; i--) if (now - this.toasts[i].born > this.toasts[i].life) this.toasts.splice(i, 1);
 
       for (const w of WEAPONS) {
@@ -1121,7 +1132,7 @@
       R.drawCrosshair(ctx, th, this.aim.x, this.aim.y);
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, wave: this.wave, cities: this.cities.filter(c => c.alive).length,
-        mult: this.multishot || 1, multFrac: this.multishotT > 0 ? this.multishotT / MULT_DURATION : 0 });
+        mult: this.multishot || 1, multFrac: this.multishotT > 0 ? this.multishotT / MULT_DURATION : 0, scale: this.uiScale });
       // ---- bottom CONTROL DOCK: arsenal · incoming pickups · killstreaks ----
       const chips = this.weaponChips.map(ch => { const w = WMAP[ch.id]; const cd = this.cdT[ch.id] || 0; return {
         rect: ch, short: w.short, id: ch.id, color: w.color, locked: !this.unlocked[ch.id], active: this.weapon === ch.id,
@@ -1138,7 +1149,7 @@
         lvl: u.kind === "range" ? this.townRangeLvl : (u.kind === "multi" ? this.townMultiLvl : 0) }; }).filter(m => m.rect);
       // bouncing-arrow cues point at the SPECIFIC new item, not the whole section
       const newChip = this.hintArsenal > 0 ? chips.find(c => c.id === this.newWeapon) : null;
-      R.drawDock(ctx, th, { dockTop: this.dockTop, dockH: this.dockH, w: this._w, now: now,
+      R.drawDock(ctx, th, { dockTop: this.dockTop, dockH: this.dockH, w: this._w, now: now, scale: this.uiScale,
         weapons: chips, pickups: picks, pickupSlots: this.pickupSlots, streaks: strk, streakSlots: this.streakSlots,
         militia: militia, militiaSlots: this.militiaSlots,
         meter: this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1,
