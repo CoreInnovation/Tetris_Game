@@ -24,7 +24,8 @@
       this.pointerInput = true;            // we use drag/pointer — hide the touch button bar
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600;
-      this.moveDir = 0; this._ptrActive = false; this.targetX = 0;
+      this.moveDir = 0; this._ptrActive = false; this._ptrMode = "mouse"; this.targetX = 0;
+      this.touchSens = clamp(ctx.storage.get("pong:sens", 1), 0.4, 2.5);   // mobile drag sensitivity
       this._bindInput();
     }
 
@@ -46,7 +47,7 @@
     destroy() {
       const c = this.shell.canvas;
       if (this._mm) c.removeEventListener("mousemove", this._mm);
-      if (this._ts) { c.removeEventListener("touchstart", this._ts); c.removeEventListener("touchmove", this._ts); }
+      if (this._tstart) { c.removeEventListener("touchstart", this._tstart); c.removeEventListener("touchmove", this._tmove); c.removeEventListener("touchend", this._tend); c.removeEventListener("touchcancel", this._tend); }
       this._unsub.forEach(fn => fn()); this._unsub.length = 0;
     }
 
@@ -58,8 +59,17 @@
     }
     menus() {
       const self = this;
-      return { skin: { options: P.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id,
-        set: (id) => { const t = P.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("pong:theme", id); if (!t.effects.particles) self.particles.clear(); } } } };
+      return {
+        control: {
+          sliders: [{
+            id: "sens", name: "Touch sensitivity", min: 0.4, max: 2.5, step: 0.1, value: this.touchSens,
+            format: (v) => v.toFixed(1) + "×",
+            set: (v) => { self.touchSens = v; self.shell.storage.set("pong:sens", v); }
+          }]
+        },
+        skin: { options: P.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id,
+          set: (id) => { const t = P.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("pong:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
+      };
     }
 
     // ---------------- layout ----------------
@@ -107,11 +117,19 @@
         if (code === "ArrowLeft" && this.moveDir === -1) this._recompute();
         else if (code === "ArrowRight" && this.moveDir === 1) this._recompute();
       }));
-      this._mm = (e) => { if (this.paused || this.state !== "playing") return; this.targetX = (e.clientX - canvas.getBoundingClientRect().left) * (this._w / canvas.getBoundingClientRect().width); this._ptrActive = true; };
-      this._ts = (e) => { if (this.paused || this.state !== "playing") return; const t = e.touches && e.touches[0]; if (!t) return; e.preventDefault(); this.targetX = (t.clientX - canvas.getBoundingClientRect().left) * (this._w / canvas.getBoundingClientRect().width); this._ptrActive = true; };
+      const courtX = (clientX) => { const r = canvas.getBoundingClientRect(); return (clientX - r.left) * (this._w / r.width); };
+      // MOUSE: absolute (precise on desktop)
+      this._mm = (e) => { if (this.paused || this.state !== "playing") return; this.targetX = courtX(e.clientX); this._ptrActive = true; this._ptrMode = "mouse"; };
+      // TOUCH: RELATIVE drag — first touch anchors at the paddle's current spot, then it tracks the
+      // finger's *movement* (× sensitivity). No jump-to-finger; drag from anywhere on screen.
+      this._tstart = (e) => { if (this.paused || this.state !== "playing") return; const t = e.touches && e.touches[0]; if (!t) return; e.preventDefault(); this._dragX0 = courtX(t.clientX); this._padX0 = this.player.x; this.targetX = this.player.x; this._ptrActive = true; this._ptrMode = "touch"; };
+      this._tmove = (e) => { if (this.paused || this.state !== "playing") return; const t = e.touches && e.touches[0]; if (!t) return; e.preventDefault(); if (this._dragX0 == null) { this._dragX0 = courtX(t.clientX); this._padX0 = this.player.x; } this.targetX = this._padX0 + (courtX(t.clientX) - this._dragX0) * this.touchSens; this._ptrMode = "touch"; this._ptrActive = true; };
+      this._tend = () => { this._dragX0 = null; };
       canvas.addEventListener("mousemove", this._mm);
-      canvas.addEventListener("touchstart", this._ts, { passive: false });
-      canvas.addEventListener("touchmove", this._ts, { passive: false });
+      canvas.addEventListener("touchstart", this._tstart, { passive: false });
+      canvas.addEventListener("touchmove", this._tmove, { passive: false });
+      canvas.addEventListener("touchend", this._tend);
+      canvas.addEventListener("touchcancel", this._tend);
     }
     _recompute() {
       const input = this.shell.input;
@@ -133,8 +151,9 @@
       // ---- player paddle ----
       const minX = c.x + this.pw / 2, maxX = c.x + c.w - this.pw / 2;
       if (this._ptrActive) {
-        const tx = clamp(this.targetX, minX, maxX), d = tx - this.player.x, step = this.pSpeed * 2.2 * dt;
-        this.player.x += clamp(d, -step, step);
+        const tx = clamp(this.targetX, minX, maxX);
+        if (this._ptrMode === "touch") { this.player.x = tx; }   // relative drag → 1:1 (finger motion already smooth)
+        else { const d = tx - this.player.x, step = this.pSpeed * 2.6 * dt; this.player.x += clamp(d, -step, step); }   // mouse: eased absolute
       } else if (this.moveDir !== 0) {
         this.player.x = clamp(this.player.x + this.moveDir * this.pSpeed * dt, minX, maxX);
       }
