@@ -31,7 +31,8 @@
       this.theme = P.getTheme(ctx.storage.get("pong:theme", "modern"));
       this.pointerInput = true;            // we use drag/pointer — hide the touch button bar
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
-      this._w = 800; this._h = 600;
+      this._cssW = 800; this._cssH = 600;   // REAL canvas size (this client's viewport) — used for letterbox + lobby chrome
+      this._w = 800; this._h = 600;         // WORLD size we lay out / simulate in (= host's size for the guest, so both match)
       this.moveDir = 0; this._ptrActive = false; this._ptrMode = "mouse"; this.targetX = 0; this._vx = 0;
       this.touchSens = clamp(ctx.storage.get("pong:sens", SENS_DEFAULT), 0.5, 3.5);   // mobile drag sensitivity (punchier default)
       // ---- online multiplayer via the reusable Arcade.Lobby (offline vs-CPU is the default) ----
@@ -40,10 +41,11 @@
       const self = this;
       this.lobby = new Arcade.Lobby({
         canvas: ctx.canvas, audio: ctx.audio,
-        w: () => this._w, h: () => this._h, theme: () => this.theme, name: () => this.myName,
+        w: () => this._cssW, h: () => this._cssH, theme: () => this.theme, name: () => this.myName,   // lobby chrome + letterbox use the REAL canvas size
         gameId: "pong", title: "MULTIPLAYER", rules: "First to 7 wins",
         winLabels: { host: "HOST WINS", guest: "CHALLENGER WINS" },
         onStart: (info) => self._startOnlineMatch(info),
+        onViewport: () => self.resize(self._cssW, self._cssH),   // guest learned the host's world size → relayout to match it
         onMessage: (m, role) => self._onNetMessage(m, role),
         onEnd: () => {},                                   // lobby draws the result; sim is frozen via blocking()
         onLeave: () => { self._reset(); }
@@ -112,7 +114,13 @@
       if (this.player == null) { this.player = { x: this.court.x + cw / 2 }; this.cpuP = { x: this.court.x + cw / 2 }; this.targetX = this.player.x; }
       else { this.player.x = clamp(this.player.x, this.court.x + this.pw / 2, this.court.x + cw - this.pw / 2); }
     }
-    resize(w, h) { this._w = w; this._h = h; this._layout(); }
+    resize(w, h) {
+      this._cssW = w; this._cssH = h;                                       // real canvas
+      this._w = this.lobby ? this.lobby.worldW() : w;                       // world = host's size for the guest, else our own
+      this._h = this.lobby ? this.lobby.worldH() : h;
+      this._layout();
+      if (this.lobby) this.lobby.notifyResize();                           // invalidate letterbox fit; host re-broadcasts its size mid-match
+    }
 
     // ---------------- serve ----------------
     _serve(dir) {
@@ -143,7 +151,7 @@
         if (code === "ArrowLeft" && this.moveDir === -1) this._recompute();
         else if (code === "ArrowRight" && this.moveDir === 1) this._recompute();
       }));
-      const courtX = (clientX) => { const r = canvas.getBoundingClientRect(); return (clientX - r.left) * (this._w / r.width); };
+      const courtX = (clientX) => this.lobby.mapPoint(clientX, 0).x;   // client px -> WORLD x (handles the guest's letterbox inverse)
       // lobby chrome (PLAY ONLINE pill, lobby/keypad/result buttons) intercepts taps BEFORE paddle control
       this._md = (e) => { this.lobby.pointerDown(e.clientX, e.clientY); };
       canvas.addEventListener("mousedown", this._md);
@@ -189,6 +197,7 @@
       else if (m.t === "state") { if (role === "guest") this._applyState(m); }
     }
     _applyState(m) {   // guest: trust the host's authoritative snapshot
+      if (this.lobby && m.hw) this.lobby.noteHostViewport(m.hw, m.hh);   // self-heal the shared world size if the vp emote was missed
       if (!this.ball) this.ball = { x: 0, y: 0, vx: 0, vy: 0, r: this.br };
       const b = this.ball; b.x = m.bx; b.y = m.by; b.vx = m.bvx; b.vy = m.bvy;
       this.player.x = m.hx;                 // host's bottom paddle
@@ -196,7 +205,7 @@
     }
     _netSendState() {
       const b = this.ball || { x: 0, y: 0, vx: 0, vy: 0 };
-      this.lobby.sendThrottled({ t: "state", bx: Math.round(b.x), by: Math.round(b.y), bvx: b.vx, bvy: b.vy,
+      this.lobby.sendThrottled({ t: "state", hw: Math.round(this._w), hh: Math.round(this._h), bx: Math.round(b.x), by: Math.round(b.y), bvx: b.vx, bvy: b.vy,
         hx: Math.round(this.player.x), sH: this.sH, sG: this.sG, serveT: Math.max(0, this.serveT | 0), sd: this._serveDir }, 30);
     }
 
@@ -344,28 +353,31 @@
     // ---------------- render ----------------
     render(now) {
       const ctx = this.ctx2d, th = this.theme, pal = th.palette, c = this.court;
-      this._drawBg(ctx, th, now);
+      ctx.fillStyle = pal.bg1; ctx.fillRect(0, 0, this._cssW, this._cssH);   // full-canvas backdrop (doubles as the guest's letterbox bars)
       let sx = 0, sy = 0;
       if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
-      ctx.save(); ctx.translate(sx, sy);
-      if (this._isGuest()) { const cy2 = c.y + c.h / 2; ctx.translate(0, 2 * cy2); ctx.scale(1, -1); }   // mirror so the guest sees THEIR paddle at the bottom
+      this.lobby.applyViewport(ctx);   // GUEST: letterbox the host's world into our canvas (identity for host/offline)
+      this._drawBg(ctx, th, now);      // world bg — stable (no shake)
 
+      ctx.save(); ctx.translate(sx, sy);   // shake only the playfield
+      if (this._isGuest()) { const cy2 = c.y + c.h / 2; ctx.translate(0, 2 * cy2); ctx.scale(1, -1); }   // mirror so the guest sees THEIR paddle at the bottom
       // court frame + net
       ctx.strokeStyle = pal.wall; ctx.lineWidth = 2;
       if (th.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = pal.wall; }
       ctx.strokeRect(c.x, c.y, c.w, c.h); ctx.shadowBlur = 0;
       ctx.strokeStyle = pal.net; ctx.lineWidth = Math.max(2, this.ph * 0.4); ctx.setLineDash([this.ph, this.ph]);
       ctx.beginPath(); ctx.moveTo(c.x + 6, c.y + c.h / 2); ctx.lineTo(c.x + c.w - 6, c.y + c.h / 2); ctx.stroke(); ctx.setLineDash([]);
-
       this._drawPaddle(ctx, th, this.cpuP.x, this.cpuY, pal.cpu, true);
       this._drawPaddle(ctx, th, this.player.x, this.playerY, pal.player, false);
       this._drawBall(ctx, th, now);
       this.particles.render(ctx);
-      ctx.restore();
+      ctx.restore();   // end shake + mirror
 
-      this._drawHud(ctx, th, now);
+      this._drawHud(ctx, th, now);   // world units, un-mirrored, stable
       if (this.flash > 0) { ctx.save(); ctx.globalAlpha = this.flash * 0.4; ctx.fillStyle = pal.danger; ctx.fillRect(0, 0, this._w, this._h); ctx.restore(); }
-      this.lobby.render(now);   // PLAY ONLINE pill / lobby / keypad / waiting / result — all reusable chrome
+      this.lobby.endViewport(ctx);   // end letterbox
+
+      this.lobby.render(now);   // PLAY ONLINE pill / lobby / keypad / waiting / result — full-canvas chrome, never letterboxed
       if (th.effects.scanlines) this._scanlines(ctx);
     }
 
@@ -459,7 +471,7 @@
     }
 
     _rr(ctx, x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-    _scanlines(ctx) { ctx.save(); ctx.globalAlpha = 0.10; ctx.fillStyle = "#000"; for (let y = 0; y < this._h; y += 3) ctx.fillRect(0, y, this._w, 1); ctx.restore(); }
+    _scanlines(ctx) { ctx.save(); ctx.globalAlpha = 0.10; ctx.fillStyle = "#000"; for (let y = 0; y < this._cssH; y += 3) ctx.fillRect(0, y, this._cssW, 1); ctx.restore(); }
   }
 
   P.Game = Pong;

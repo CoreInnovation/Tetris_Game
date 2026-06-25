@@ -163,16 +163,19 @@
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("missile:song", 0) | 0));
       this.pointerInput = true; this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
-      this._w = 800; this._h = 600; this.weaponChips = [];
+      this._cssW = 800; this._cssH = 600;   // REAL canvas size (this client's viewport) — used for letterbox + lobby chrome
+      this._w = 800; this._h = 600; this.weaponChips = [];   // WORLD size we lay out / simulate / render in (= host's size for the guest)
       // ---- CO-OP via Arcade.Lobby (host runs the sim; guest is a 2nd gun). Offline is the default + untouched. ----
       this.myName = ctx.storage.get("arcade:player", "") || ("P" + (1000 + (Math.random() * 9000 | 0)));
-      this.coopSnap = null; this.guestAim = null;
+      this.coopSnap = null; this.guestAim = null; this.coopDock = null; this.coopPow = []; this._hostGroundY = 0;   // guest mirrors the host's dock/pods
+      this._guestWeapon = "interceptor";   // host fires the GUEST's relayed shots with the weapon the guest picked (per-player arsenal)
       const self = this;
       this.lobby = Arcade.Lobby ? new Arcade.Lobby({
         canvas: ctx.canvas, audio: ctx.audio,
-        w: () => this._w, h: () => this._h, theme: () => this.theme, name: () => this.myName,
+        w: () => this._cssW, h: () => this._cssH, theme: () => this.theme, name: () => this.myName,   // lobby chrome + letterbox use the REAL canvas size
         gameId: "missile", title: "CO-OP DEFENSE", rules: "Defend the cities together",
         onStart: (info) => self._startCoop(info),
+        onViewport: () => self.resize(self._cssW, self._cssH),   // guest learned the host's world size → relayout to match it
         onMessage: (m, role) => self._onCoopMsg(m, role),
         onEnd: () => {},
         onLeave: () => { self._reset(); }
@@ -274,7 +277,11 @@
       this._unsub.push(input.onDown((code, e, repeat) => {
         if (this.lobby && this.lobby.keydown(e)) return;        // typing a room code into the on-canvas keypad
         if (this.paused || this.state !== "playing" || repeat || (this.lobby && this.lobby.blocking())) return;
-        if (this._isGuest()) return;                            // guest fires by clicking (no weapon/streak keys)
+        if (this._isGuest()) {                                  // guest: keys relay dock intents to the host (firing stays click-driven)
+          if (code.indexOf("Digit") === 0) { const n = parseInt(code.slice(5), 10) - 1; const wid = WEAPONS[n] && WEAPONS[n].id; if (wid && this.coopDock && this.coopDock.cw && this.coopDock.cw.indexOf(wid) >= 0) { this.lobby.send({ t: "sel", id: wid }); this._guestWeapon = wid; this.audio.play("select"); } }
+          else if (code === "KeyR") this.lobby.send({ t: "streak", k: 0 });
+          return;
+        }
         if (code.indexOf("Digit") === 0) { const n = parseInt(code.slice(5), 10) - 1; if (n >= 0 && n < WEAPONS.length) this._selectWeapon(WEAPONS[n].id); return; }
         if (code === "Space") this._fire(this.aim.x, this.aim.y);
         else if (code === "KeyQ") this._selectWeapon(this._prevUnlocked());
@@ -285,16 +292,27 @@
         const r = canvas.getBoundingClientRect();
         return { x: (e.clientX - r.left) * (this._w / r.width), y: (e.clientY - r.top) * (this._h / r.height) };
       };
-      this._pm = (e) => { if (this.paused || this.state !== "playing") return; const p = toLocal(e); this.aim.x = p.x; this.aim.y = p.y; };
+      this._pm = (e) => { if (this.paused || this.state !== "playing") return; const p = this.lobby ? this.lobby.mapPoint(e.clientX, e.clientY) : toLocal(e); this.aim.x = p.x; this.aim.y = p.y; };
       this._pd = (e) => {
         if (this.lobby && this.lobby.pointerDown(e.clientX, e.clientY)) { e.preventDefault(); return; }   // lobby chrome (pill/keypad/buttons) first
         if (this.paused || this.state !== "playing") return; e.preventDefault();
         if (this.lobby && this.lobby.blocking()) return;
-        if (this._isGuest()) {   // co-op guest: a play-area click fires at that point (relayed to the host)
+        if (this._isGuest()) {   // co-op guest: same dock as the host (click to switch weapon / use streak / equip), play-area click fires
           if (e.button !== 0 && e.button !== undefined) return;
-          const gp = toLocal(e); if (gp.y >= this.dockTop) return;
+          const gp = this.lobby.mapPoint(e.clientX, e.clientY);   // client px -> HOST world coords (letterbox inverse)
+          const inR = (r) => r && gp.x >= r.x && gp.x <= r.x + r.w && gp.y >= r.y && gp.y <= r.y + r.h;
+          if (this._bannerRect && this.coopDock && this.coopDock.nw && inR(this._bannerRect)) {   // equip the NEW WEAPON
+            this.lobby.send({ t: "equip", id: this.coopDock.nw }); this._guestWeapon = this.coopDock.nw;
+            const r = this._bannerRect, bc = (WMAP[this.coopDock.nw] && WMAP[this.coopDock.nw].color) || this.theme.palette.accent;
+            this._burst(r.x + r.w / 2, r.y + r.h / 2, bc, 10); this.audio.play("extralife");   // guest-safe feedback (host owns the pop/shatter)
+            return;
+          }
+          for (const ch of this.weaponChips) { if (inR(ch)) { this.lobby.send({ t: "sel", id: ch.id }); this._guestWeapon = ch.id; this.audio.play("select"); return; } }   // pick a weapon
+          const stN = (this.coopDock && this.coopDock.st) ? this.coopDock.st.length : 0;
+          for (let k = 0; k < stN && k < this.streakSlots.length; k++) { if (inR(this.streakSlots[k])) { this.lobby.send({ t: "streak", k: k }); this.audio.play("select"); return; } }   // unleash a killstreak
+          if (gp.x < 0 || gp.x > this._w || gp.y < 0 || gp.y >= this.dockTop) return;   // ignore taps in the letterbox bars / dock — only fire into the playfield
           this.aim.x = gp.x; this.aim.y = gp.y;
-          this.lobby.send({ t: "fire", nx: gp.x / this._w, ny: gp.y / this.groundY });
+          this.lobby.send({ t: "fire", x: Math.round(gp.x), y: Math.round(gp.y) });
           this._burst(gp.x, gp.y, this.theme.palette.accent || "#7afcff", 5);   // local tap feedback
           return;
         }
@@ -898,24 +916,58 @@
     _startCoop(info) {
       this._reset();
       this.coopSnap = null; this.guestAim = { x: this._w / 2, y: this._h * 0.4 };
+      this.coopDock = null; this.coopPow = []; this._guestWeapon = "interceptor"; this._hostGroundY = 0; this._hostDockH = 0; this._hostUiScale = 0;   // fresh co-op session
       this._toast(info.role === "host" ? "CO-OP — defend together!" : "CO-OP — joined! Defend together!", true, this.theme.palette.accent);
     }
     _onCoopMsg(m, role) {
       if (!m) return;
-      if (role === "host") {
-        if (m.t === "fire") { const x = m.nx * this._w, y = m.ny * this.groundY; this.aim.x = x; this.aim.y = y; this._fire(x, y); }
-        else if (m.t === "aim") { this.guestAim = { x: m.nx * this._w, y: m.ny * this.groundY }; }
-      } else if (role === "guest" && m.t === "snap") { this._applyCoopSnap(m); }
+      if (role === "host") {   // coords now arrive as raw HOST px (both clients share the host's world)
+        if (m.t === "fire") {
+          this.guestAim = { x: m.x, y: m.y };
+          const saved = this.weapon;
+          if (this._guestWeapon && this.unlocked[this._guestWeapon]) this.weapon = this._guestWeapon;   // fire with the GUEST's chosen weapon (per-player arsenal)
+          this._fire(m.x, m.y);
+          this.weapon = saved;
+        }
+        else if (m.t === "aim") { this.guestAim = { x: m.x, y: m.y }; }
+        else if (m.t === "sel") { if (m.id && this.unlocked[m.id]) this._guestWeapon = m.id; }
+        else if (m.t === "equip") { if (m.id && this.unlocked[m.id]) this._guestWeapon = m.id; }
+        else if (m.t === "streak") { this._useStreak(m.k | 0); }
+      } else if (role === "guest") {
+        if (m.t === "snap") this._applyCoopSnap(m);
+        else if (m.t === "dock") { if (m.d) this.coopDock = m.d; this.coopPow = m.p || []; }
+      }
     }
-    _applyCoopSnap(m) { this.coopSnap = m; this.score = m.sc; this.wave = m.w; this.betweenWaves = !!m.bw; }
+    _applyCoopSnap(m) { this.coopSnap = m; this.score = m.sc; this.wave = m.w; this.betweenWaves = !!m.bw; if (m.gy) this._hostGroundY = m.gy; if (m.dh) this._hostDockH = m.dh; if (m.us) this._hostUiScale = m.us; if (this.lobby && m.hw) this.lobby.noteHostViewport(m.hw, m.hh); }
     _coopBroadcast() {
       if (!this.lobby) return;
-      const W = this._w || 1, GY = this.groundY || 1, r3 = (v) => Math.round(v * 1000) / 1000;
-      const e = []; for (let i = 0; i < this.enemies.length && i < 70; i++) { const m = this.enemies[i]; e.push([r3(m.x / W), r3(m.y / GY), Math.round((m.def && m.def.size) || m.size || 3), (m.def && m.def.color) || this.theme.palette.enemy]); }
-      const bl = []; for (let i = 0; i < this.explosions.length && i < 30; i++) { const x = this.explosions[i]; bl.push([r3(x.x / W), r3(x.y / GY), r3((x.r || 0) / W), x.color || "#ff8c2a"]); }
+      const r0 = (v) => Math.round(v), pal = this.theme.palette;   // raw HOST px — the guest adopts the host's world (letterboxed), so coords apply verbatim
+      const e = []; for (let i = 0; i < this.enemies.length && i < 60; i++) { const m = this.enemies[i]; e.push([r0(m.x), r0(m.y), Math.round((m.def && m.def.size) || m.size || 3), (m.def && m.def.color) || pal.enemy]); }
+      const bl = []; for (let i = 0; i < this.explosions.length && i < 24; i++) { const x = this.explosions[i]; bl.push([r0(x.x), r0(x.y), r0(x.r || 0), x.color || "#ff8c2a"]); }
+      const it = []; for (let i = 0; i < this.interceptors.length && i < 24; i++) { const t = this.interceptors[i]; it.push([r0(t.x), r0(t.y), r0(t.bx != null ? t.bx : t.x), r0(t.by != null ? t.by : t.y), t.color || pal.interceptor]); }
+      const uf = []; for (let i = 0; i < this.ufos.length && i < 8; i++) { const u = this.ufos[i]; uf.push([r0(u.x), r0(u.y), Math.round(u.radius || 16)]); }
       let cb = 0; this.cities.forEach((c, i) => { if (c.alive) cb |= (1 << i); });
       let bb = 0; this.batteries.forEach((b, i) => { if (b.alive) bb |= (1 << i); });
-      this.lobby.sendThrottled({ t: "snap", w: this.wave, sc: this.score, bw: this.betweenWaves ? 1 : 0, c: cb, b: bb, e: e, bl: bl, hx: r3(this.aim.x / W), hy: r3(this.aim.y / GY) }, 20);
+      this.lobby.sendThrottled({ t: "snap", hw: r0(this._w), hh: r0(this._h), gy: r0(this.groundY), dh: r0(this.dockH), us: Math.round((this.uiScale || 1) * 1000) / 1000, w: this.wave, sc: this.score, bw: this.betweenWaves ? 1 : 0, c: cb, b: bb, e: e, bl: bl, it: it, uf: uf, hx: r0(this.aim.x), hy: r0(this.aim.y) }, 20);
+      this._coopBroadcastDock(r0);
+    }
+    // dock + falling pods stream on a SEPARATE, slower channel (changes slowly) — keeps each message well under the relay's size cap
+    _coopBroadcastDock(r0) {
+      const r2 = (v) => Math.round((v || 0) * 100) / 100, cw = (this.collected || []).slice();
+      const dock = {
+        cw: cw, aw: this.weapon,
+        hf: cw.map(id => r2(this.heat[id] || 0)),
+        cf: cw.map(id => { const cd = this.cdT[id] || 0; return cd > 0 ? r2(cd / (this.cdMax[id] || (WMAP[id] && WMAP[id].cd) || 1)) : 0; }),
+        rf: cw.map(id => r2(1 - Math.max(0, this.reload[id] || 0) / (this.reloadMax[id] || (WMAP[id] && WMAP[id].reload) || 1))),
+        st: (this.streaks || []).slice(),
+        mu: (this.townUpgrades || []).slice(), mr: this.townRangeLvl || 0, mm: this.townMultiLvl || 0,
+        mtr: this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1,
+        ml: this.multishot || 1, mf: this.multishotT > 0 ? this.multishotT / MULT_DURATION : 0,
+        nw: (this.newWeaponT > 0 && this.newWeapon) ? this.newWeapon : null,
+        nwf: this.newWeaponT > 0 ? Math.max(0, this.newWeaponT / NEW_WEAPON_BANNER_MS) : 0
+      };
+      const p = []; for (const pu of this.powerups) p.push({ x: r0(pu.x), y: r0(pu.y), color: pu.color, weapon: pu.weapon, town: pu.town, kind: pu.kind, mult: pu.mult });
+      this.lobby.sendThrottled({ t: "dock", d: dock, p: p }, 10);
     }
 
     // ---------------- update ----------------
@@ -1289,10 +1341,16 @@
       }
       if (this._isHost()) this._coopBroadcast();   // co-op: stream the authoritative snapshot to the guest
     }
-    _guestTick(dt) { if (this.lobby) this.lobby.sendThrottled({ t: "aim", nx: (this.aim.x / this._w) || 0, ny: (this.aim.y / this.groundY) || 0 }, 20); }
+    _guestTick(dt) { if (this.lobby) this.lobby.sendThrottled({ t: "aim", x: Math.round(this.aim.x), y: Math.round(this.aim.y) }, 20); }
 
     // ---------------- render ----------------
-    resize(w, h) { this._w = w; this._h = h; this._layout(w, h); this.renderer.w = w; this.renderer.h = h; this.renderer.groundY = this.groundY; }
+    resize(w, h) {
+      this._cssW = w; this._cssH = h;                                      // real canvas
+      const ww = this.lobby ? this.lobby.worldW() : w, wh = this.lobby ? this.lobby.worldH() : h;   // world = host's size for the guest, else our own
+      this._w = ww; this._h = wh; this._layout(ww, wh);
+      this.renderer.w = ww; this.renderer.h = wh; this.renderer.groundY = this.groundY;
+      if (this.lobby) this.lobby.notifyResize();                          // invalidate letterbox fit; host re-broadcasts its size mid-match
+    }
 
     render(now) {
       const ctx = this.ctx2d, R = this.renderer, th = this.theme;
@@ -1322,6 +1380,7 @@
       for (const z of this.zaps) R.drawZap(ctx, th, z);
       this.particles.render(ctx);
       // aim crosshair + (when multi-fire is active) dim markers showing where each extra shot lands
+      if (this._coop() && this.guestAim) { ctx.save(); ctx.globalAlpha = 0.7; R.drawCrosshair(ctx, th, this.guestAim.x, this.guestAim.y, null, this.uiScale); ctx.restore(); }   // co-op partner's reticle
       R.drawCrosshair(ctx, th, this.aim.x, this.aim.y, (this.multishot || 1) > 1 ? this._salvoPoints(this.aim.x, this.aim.y) : null, this.uiScale);
       ctx.restore();
       R.drawHUD(ctx, th, { score: this.score, wave: this.wave, cities: this.cities.filter(c => c.alive).length,
@@ -1386,21 +1445,53 @@
 
     // co-op GUEST view: rendered from the host's snapshot (simple, clear tactical read)
     _renderGuest(ctx, R, th, now) {
-      const snap = this.coopSnap, W = this._w, GY = this.groundY;
+      const snap = this.coopSnap, pal = th.palette;
+      // adopt the HOST's EXACT layout (uiScale + dock height) so both screens show the same framing
+      if (this._hostUiScale) this.uiScale = this._hostUiScale;
+      if (this._hostDockH) { this.dockH = this._hostDockH; this.dockTop = this._h - this.dockH; this.groundY = this.dockTop - 12; }
+      else if (this._hostGroundY) { this.groundY = this._hostGroundY; this.dockTop = this.groundY + 12; this.dockH = this._h - this.dockTop; }
+      this.renderer.groundY = this.groundY;
+      if (this.coopDock && this.coopDock.cw) { this.collected = this.coopDock.cw.slice(); this._layoutDock(); }   // rects now match the host
+      const GY = this.groundY;
+      // full-canvas backdrop + letterbox bars so the slack is clean
+      ctx.fillStyle = pal.bg1 || "#05070d"; ctx.fillRect(0, 0, this._cssW, this._cssH);
+      if (this.lobby) { this.lobby.drawLetterboxBars(ctx, pal.bg1 || "#05070d"); this.lobby.applyViewport(ctx); }   // letterbox the host world into our canvas
       R.drawBackground(ctx, th, now, GY);
-      ctx.save();
       R.drawGround(ctx, th, GY);
       const cb = snap ? snap.c : 0, bb = snap ? snap.b : 0;
       this.cities.forEach((c, i) => R.drawCity(ctx, th, c.x, !!(cb & (1 << i))));
       this.batteries.forEach((b, i) => R.drawBattery(ctx, th, b.x, !!(bb & (1 << i))));
-      if (snap && snap.bl) for (const x of snap.bl) { const r = x[2] * W; R.drawExplosion(ctx, th, { x: x[0] * W, y: x[1] * GY, r: r, maxR: Math.max(1, r), color: x[3] }); }
-      if (snap && snap.e) for (const m of snap.e) this._drawGuestEnemy(ctx, th, m[0] * W, m[1] * GY, m[2], m[3]);
-      if (snap && snap.hx != null) R.drawCrosshair(ctx, th, snap.hx * W, snap.hy * GY, null, this.uiScale);   // host's aim
-      R.drawCrosshair(ctx, th, this.aim.x, this.aim.y, null, this.uiScale);                                   // your aim
-      ctx.restore();
+      if (snap && snap.it) for (const t of snap.it) { ctx.save(); ctx.strokeStyle = t[4]; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(t[2], t[3]); ctx.lineTo(t[0], t[1]); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = t[4]; ctx.beginPath(); ctx.arc(t[0], t[1], 2.5, 0, 6.2832); ctx.fill(); ctx.restore(); }   // host's outgoing shots
+      if (snap && snap.uf) for (const u of snap.uf) R.drawUfo(ctx, th, { x: u[0], y: u[1], radius: u[2] || 16 }, now);
+      if (snap && snap.bl) for (const x of snap.bl) { const r = x[2]; R.drawExplosion(ctx, th, { x: x[0], y: x[1], r: r, maxR: Math.max(1, r), color: x[3] }); }
+      if (snap && snap.e) for (const m of snap.e) this._drawGuestEnemy(ctx, th, m[0], m[1], m[2], m[3]);
+      if (this.coopPow) for (const pu of this.coopPow) R.drawDrop(ctx, th, pu, now, this.uiScale);   // falling supply pods — visible + shootable for the guest
+      this.particles.render(ctx);   // guest's own tap/equip feedback bursts (emitted in world coords)
+      if (snap && snap.hx != null) R.drawCrosshair(ctx, th, snap.hx, snap.hy, null, this.uiScale);   // host's aim
+      R.drawCrosshair(ctx, th, this.aim.x, this.aim.y, null, this.uiScale);                          // your aim
       let alive = 0, v = cb; while (v) { alive += v & 1; v >>= 1; }
-      R.drawHUD(ctx, th, { score: snap ? snap.sc : 0, wave: snap ? snap.w : 1, cities: alive, mult: 1, multFrac: 0, scale: this.uiScale });
+      const d = this.coopDock;
+      R.drawHUD(ctx, th, { score: snap ? snap.sc : 0, wave: snap ? snap.w : 1, cities: alive, mult: d ? (d.ml || 1) : 1, multFrac: d ? (d.mf || 0) : 0, scale: this.uiScale });
+      if (d) this._drawGuestDock(ctx, R, th, now, d); else this._bannerRect = null;   // the SHARED control dock — visible + clickable for the guest
       this._renderToasts(ctx, R, th, now);
+      if (this.lobby) this.lobby.endViewport(ctx);
+    }
+    // Rebuild the dock render arrays from the host's broadcast dock state, using the guest's (host-matched) rects.
+    _drawGuestDock(ctx, R, th, now, d) {
+      const chips = this.weaponChips.map((ch, i) => { const w = WMAP[ch.id] || {}; return {
+        rect: ch, short: w.short, id: ch.id, color: w.color, locked: false, active: d.aw === ch.id,
+        heatFrac: (d.hf && d.hf[i]) || 0, cooling: ((d.cf && d.cf[i]) || 0) > 0, cdFrac: (d.cf && d.cf[i]) || 0,
+        reloadFrac: (d.rf && d.rf[i] != null) ? d.rf[i] : 1, keyNum: WEAPONS.findIndex(x => x.id === ch.id) + 1 }; });
+      const strk = (d.st || []).map((id, i) => { const s = SMAP[id] || {}; return { rect: this.streakSlots[i], id: id, icon: s.icon, color: s.color, name: s.name, picked: false }; }).filter(s => s.rect);
+      const militia = (d.mu || []).map((id, i) => { const u = TUMAP[id] || {}; return { rect: this.militiaSlots[i], id: id, short: u.short, color: u.color, lvl: u.kind === "range" ? (d.mr || 0) : (u.kind === "multi" ? (d.mm || 0) : 0) }; }).filter(m => m.rect);
+      R.drawDock(ctx, th, { dockTop: this.dockTop, dockH: this.dockH, w: this._w, now: now, scale: this.uiScale,
+        weapons: chips, streaks: strk, streakSlots: this.streakSlots, militia: militia, militiaSlots: this.militiaSlots,
+        meter: d.mtr != null ? d.mtr : 1, nextSlot: Math.min((d.st || []).length, STREAK_MAX - 1), hint: { arsenal: 0 } });
+      if (d.nw && WMAP[d.nw]) {
+        const nw = WMAP[d.nw];
+        this._bannerRect = R.drawNewWeaponBanner(ctx, th, { id: d.nw, name: nw.name, color: nw.color || th.palette.accent,
+          frac: d.nwf || 0, keyNum: WEAPONS.findIndex(x => x.id === d.nw) + 1, active: d.aw === d.nw, scale: this.uiScale, now: now, pop: 0 });
+      } else this._bannerRect = null;
     }
     _drawGuestEnemy(ctx, th, x, y, sz, col) {
       const TAU = Math.PI * 2; sz = Math.max(3, sz);
