@@ -176,7 +176,7 @@
 
     // lobby fires this on both sides when a match (re)starts
     _startOnlineMatch(info) {
-      this.sH = 0; this.sG = 0; this._guestX = null; this._vx = 0;
+      this.sH = 0; this.sG = 0; this.score = 0; this._guestX = null; this._vx = 0;   // fresh online session (don't carry the offline score into the HUD)
       this._layout();
       const c = this.court; this.player.x = c.x + c.w / 2; this.cpuP.x = c.x + c.w / 2;
       this.ball = { x: c.x + c.w / 2, y: c.y + c.h / 2, vx: 0, vy: 0, r: this.br };
@@ -348,6 +348,7 @@
       let sx = 0, sy = 0;
       if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
       ctx.save(); ctx.translate(sx, sy);
+      if (this._isGuest()) { const cy2 = c.y + c.h / 2; ctx.translate(0, 2 * cy2); ctx.scale(1, -1); }   // mirror so the guest sees THEIR paddle at the bottom
 
       // court frame + net
       ctx.strokeStyle = pal.wall; ctx.lineWidth = 2;
@@ -423,8 +424,9 @@
       // big CPU / YOU tallies flanking the net
       ctx.fillStyle = pal.textDim; ctx.font = "900 " + Math.round(c.h * 0.10) + "px " + th.fonts.score;
       ctx.globalAlpha = th.id === "classic" ? 0.9 : 0.5;
-      const online = this._online();
-      const topN = online ? this.sG : this.cpu, botN = online ? this.sH : this.points;   // top paddle's score above the net
+      const online = this._online(), guest = this._isGuest();
+      // top paddle's score above the net; for the mirrored guest view the host is on top
+      const topN = online ? (guest ? this.sH : this.sG) : this.cpu, botN = online ? (guest ? this.sG : this.sH) : this.points;
       ctx.textBaseline = "bottom"; ctx.fillText(String(topN), c.x + c.w * 0.5, c.y + c.h / 2 - 8);
       ctx.textBaseline = "top"; ctx.fillText(String(botN), c.x + c.w * 0.5, c.y + c.h / 2 + 8);
       ctx.globalAlpha = 1;

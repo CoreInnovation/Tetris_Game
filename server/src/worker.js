@@ -90,6 +90,7 @@ export class PongRoom {
   async fetch(request) {
     const url = new URL(request.url);
     const name = (url.searchParams.get("name") || "Player").slice(0, 16);
+    this.peers = this.peers.filter(p => { try { return p.ws.readyState === 1; } catch (e) { return false; } });   // prune dead/ghost sockets so a stale host can't block a reused code
     if (this.peers.length >= 2) {
       const pair = new WebSocketPair();
       pair[1].accept(); pair[1].send(JSON.stringify({ t: "full" })); pair[1].close(1000, "full");
@@ -98,7 +99,7 @@ export class PongRoom {
     const pair = new WebSocketPair();
     const client = pair[0], server = pair[1];
     server.accept();
-    const role = this.peers.length === 0 ? "host" : "guest";
+    const role = this.peers.some(p => p.role === "host") ? "guest" : "host";   // assign by FREE slot, not count, so we never end up with two guests
     const peer = { ws: server, role, name, win: 0, winReset: Date.now() };
     this.peers.push(peer);
 
@@ -133,6 +134,10 @@ export class PongRoom {
     const i = this.peers.indexOf(peer); if (i < 0) return;
     this.peers.splice(i, 1);
     const other = this.peers[0];
-    if (other) { try { other.ws.send(JSON.stringify({ t: "peer", event: "left", name: peer.name })); } catch {} }
+    if (other) {
+      // if the HOST left, promote the survivor so a rejoin doesn't create a two-guest room
+      if (peer.role === "host" && other.role !== "host") { other.role = "host"; try { other.ws.send(JSON.stringify({ t: "role", role: "host" })); } catch (e) {} }
+      try { other.ws.send(JSON.stringify({ t: "peer", event: "left", name: peer.name })); } catch (e) {}
+    }
   }
 }

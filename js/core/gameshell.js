@@ -82,9 +82,10 @@
       GEST.forEach(ev => window.addEventListener(ev, tryUnlock, true));
 
       window.addEventListener("resize", () => this._resize());
-      // Auto-pause if the window loses focus, so held keys can't get "stuck".
-      window.addEventListener("blur", () => this.togglePause(true));
-      document.addEventListener("visibilitychange", () => { if (document.hidden) this.togglePause(true); else this.audio.unlock(); });
+      // Auto-pause if the window loses focus, so held keys can't get "stuck" — EXCEPT during an
+      // online match, where pausing the host would freeze the sim and desync the other player.
+      window.addEventListener("blur", () => { if (!this._onlineActive()) this.togglePause(true); });
+      document.addEventListener("visibilitychange", () => { if (document.hidden) { if (!this._onlineActive()) this.togglePause(true); } else this.audio.unlock(); });
 
       this._updateSoundIcon();
       this.showMenu();
@@ -296,9 +297,11 @@
       this._hide(this.refs.pauseOverlay);   // don't leave a pause overlay stacked under game-over
       this._hide(this.refs.pauseBtn);       // pause is meaningless once the game is over
       this._show(this.refs.gameoverOverlay);
-      this._lastScore = score; this._lastGameId = this._module.id;
+      this._lastScore = score; this._lastGameId = this._module.id; this._submittedOver = false;
       this._submitAndShowBoard(this._module.id, score);
     }
+
+    _onlineActive() { return !!(this._game && this._game.lobby && this._game.lobby.online); }   // don't blur-pause once in an online session (host sim must keep running)
 
     // ---- shared online leaderboard on the game-over screen ----
     _playerName() { return (this.storage.get("arcade:player", "") || "").slice(0, 16); }
@@ -308,16 +311,19 @@
       this._show(board);
       const device = this.isTouch ? "mobile" : "desktop";
       if (this.refs.goName && this.refs.goName.value !== this._playerName()) this.refs.goName.value = this._playerName();
+      const reqId = (this._boardReq = (this._boardReq || 0) + 1);   // ignore out-of-order responses (stale-name resubmits)
       const render = (rows) => {
+        if (reqId !== this._boardReq) return;
         const list = this.refs.goBoardList; if (!list) return;
         list.innerHTML = (rows && rows.length)
           ? rows.map((r, i) => '<li><span class="gb-rank">' + (i + 1) + '</span><span class="gb-name">' + esc(r.name) + '</span><span class="gb-score">' + Number(r.score).toLocaleString() + "</span></li>").join("")
           : '<li class="gb-empty">No scores yet — be the first!</li>';
       };
-      render([]); if (this.refs.goBoardList) this.refs.goBoardList.innerHTML = '<li class="gb-empty">Loading…</li>';
+      if (this.refs.goBoardList) this.refs.goBoardList.innerHTML = '<li class="gb-empty">Loading…</li>';
       const name = this._playerName();
       const after = () => Arcade.Scores.top(gameId, 10, device).then(render);
-      if (name && score > 0) Arcade.Scores.submit(gameId, name, score, device).then(after, after);
+      // submit at most ONCE per game-over (editing the name afterward just re-fetches — no duplicate rows)
+      if (name && score > 0 && !this._submittedOver) { this._submittedOver = true; Arcade.Scores.submit(gameId, name, score, device).then(after, after); }
       else after();
     }
 
