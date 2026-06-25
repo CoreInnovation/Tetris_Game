@@ -162,6 +162,23 @@
       ctx.restore();
     }
 
+    // a glowing "BALL SAVE" arc strung across the drain mouth while the grace window is open
+    drawBallSave(ctx, theme, frac, now) {
+      const p = theme.palette, col = p.kick || "#46f0c0";
+      const pulse = 0.55 + 0.45 * Math.sin(now / 130);
+      ctx.save();
+      ctx.globalAlpha = (0.35 + 0.5 * frac) * (0.6 + 0.4 * pulse);
+      this._glow(ctx, theme, col, theme.effects.glow ? 14 : 0);
+      ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(190, 700, 120, Math.PI * 1.18, Math.PI * 1.82); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 0.5 + 0.5 * frac;
+      ctx.fillStyle = col; ctx.font = "800 12px " + (theme.fonts ? theme.fonts.ui : "monospace");
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("BALL SAVE", 190, 636);
+      ctx.restore();
+    }
+
     drawRamp(ctx, theme, path, entry, now) {
       const p = theme.palette;
       ctx.save();
