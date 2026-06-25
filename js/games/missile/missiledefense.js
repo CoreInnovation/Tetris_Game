@@ -333,8 +333,12 @@
     _prevUnlocked() { const u = this._unlockedIds(); return u[(u.indexOf(this.weapon) - 1 + u.length) % u.length]; }
 
     _layout(w, h) {
-      // resolution-aware UI scale so the dock/HUD aren't lost in the sauce on big screens (capped so it stays balanced)
-      this.uiScale = Math.max(1, Math.min(1.7, Math.min(w / 1100, h / 640)));
+      // resolution-aware UI scale so the dock/HUD aren't lost in the sauce on big screens (capped so it stays balanced).
+      // MOBILE gets a deliberately smaller scale: more play area + breathing room, and it guarantees the two-row dock
+      // (8 militia + 5 killstreak tiles) actually fits the narrow width instead of cramming/overflowing.
+      this.uiScale = this.shell.isTouch
+        ? Math.max(0.52, Math.min(0.95, w / 640))
+        : Math.max(1, Math.min(1.7, Math.min(w / 1100, h / 640)));
       this.dockH = Math.round(DOCK_H * this.uiScale);
       this.dockTop = h - this.dockH;
       this.groundY = this.dockTop - 12;   // thin ground strip sits just above the control dock
@@ -351,7 +355,11 @@
     // Lays out clickable rects for weapons/pickups/streaks; militia tiles are display-only.
     _layoutDock() {
       const s = this.uiScale || 1;
-      const w = this._w || 800, pad = Math.round(10 * s), gap = Math.round(6 * s), labelH = Math.round(12 * s), tileH = Math.round(38 * s);
+      const w = this._w || 800, pad = Math.round(10 * s), gap = Math.round(6 * s), labelH = Math.round(12 * s);
+      // tiles auto-shrink to guarantee the row-2 blocks (militia + killstreaks) fit the width — never cram/overflow
+      const totalTiles = TOWN_MAX + STREAK_MAX, minCenterGap = Math.round(16 * s);
+      const availRow2 = w - pad * 2 - minCenterGap - (totalTiles - 1) * gap;
+      const tileH = Math.max(Math.round(22 * s), Math.min(Math.round(38 * s), Math.floor(availRow2 / totalTiles)));
       const row1Y = this.dockTop + labelH + Math.round(4 * s);
       const row2Y = row1Y + tileH + labelH + Math.round(4 * s);
       // right column width is governed by the widest right block (killstreaks)
