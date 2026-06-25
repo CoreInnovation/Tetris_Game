@@ -10,7 +10,7 @@
 (function (Arcade) {
   "use strict";
 
-  const DEFAULT_URL = "";   // e.g. "wss://chriskit-arcade.YOURNAME.workers.dev"  (set after `wrangler deploy`)
+  const DEFAULT_URL = "wss://chriskit-arcade.coreinnovation.workers.dev";   // deployed Cloudflare Worker (Durable Objects + D1)
 
   const Net = {
     url() {

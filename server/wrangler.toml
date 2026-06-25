@@ -18,4 +18,4 @@ new_sqlite_classes = ["PongRoom"]
 [[d1_databases]]
 binding = "DB"
 database_name = "chriskit-arcade"
-database_id = "PUT-YOUR-D1-DATABASE-ID-HERE"
+database_id = "79bc5443-ce83-41e3-96ce-c240342d12a2"
