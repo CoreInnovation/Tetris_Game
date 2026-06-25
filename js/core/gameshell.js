@@ -139,6 +139,7 @@
         card.style.setProperty("--card-accent", mod.accent || "#5ad1ff");
         const best = this.storage.getHighScore(mod.id, this._device());
         card.innerHTML =
+          (mod.multiplayer ? '<span class="gc-online" title="Online multiplayer">⇄ ONLINE</span>' : "") +
           '<div class="gc-icon">' + (mod.icon || "🎮") + "</div>" +
           '<div class="gc-name">' + esc(mod.name) + "</div>" +
           '<div class="gc-tag">' + esc(mod.tagline || "") + "</div>" +

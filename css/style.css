@@ -157,6 +157,13 @@ html, body {
 }
 .game-card.disabled { opacity: 0.45; cursor: not-allowed; }
 .game-card.disabled:hover { transform: none; box-shadow: none; border-color: var(--border); }
+/* online-multiplayer badge (top-left so it clears the top-right share button) */
+.game-card .gc-online {
+  position: absolute; top: 10px; left: 10px; z-index: 3;
+  padding: 3px 8px; border-radius: 8px; font-size: 10px; font-weight: 800; letter-spacing: .04em;
+  color: var(--card-accent, var(--accent)); border: 1px solid var(--card-accent, var(--accent));
+  background: rgba(0,0,0,0.35);
+}
 
 /* per-card SHARE button — copies a deep-link URL for that game */
 .game-card .gc-share {

@@ -25,7 +25,8 @@
       const base = (opts.url || this.url()).replace(/\/+$/, "");
       const code = (opts.code || "").toUpperCase();
       const name = encodeURIComponent(opts.name || "Player");
-      const ws = new WebSocket(base + "/room?code=" + encodeURIComponent(code) + "&name=" + name);
+      const game = encodeURIComponent(opts.game || "g");
+      const ws = new WebSocket(base + "/room?code=" + encodeURIComponent(code) + "&name=" + name + "&game=" + game);
       const conn = {
         ws: ws, role: null, open: false,
         send(obj) { if (ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch (e) {} } },
