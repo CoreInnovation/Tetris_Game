@@ -340,6 +340,21 @@
         rr(ctx, cx - r * 0.8, cy - r * 0.55, r * 1.6, r * 1.1, 2); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(cx - r * 0.8, cy - r * 0.2); ctx.lineTo(cx + r * 0.8, cy - r * 0.2); ctx.stroke();
         ctx.fillRect(cx - r * 0.3, cy + r * 0.05, r * 0.18, r * 0.4); ctx.fillRect(cx + r * 0.12, cy + r * 0.05, r * 0.18, r * 0.4);
+      } else if (id === "slingshot") {   // Y-fork + a pebble
+        ctx.beginPath(); ctx.moveTo(cx, cy + r); ctx.lineTo(cx, cy); ctx.moveTo(cx, cy); ctx.lineTo(cx - r * 0.6, cy - r * 0.8); ctx.moveTo(cx, cy); ctx.lineTo(cx + r * 0.6, cy - r * 0.8); ctx.stroke();
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy - r * 0.25, r * 0.22, 0, TAU); ctx.fill();
+      } else if (id === "crossbow") {   // bow + a bolt
+        ctx.beginPath(); ctx.arc(cx, cy + r * 0.1, r * 0.8, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy + r * 0.6); ctx.lineTo(cx, cy - r * 0.9); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy - r * 0.9); ctx.lineTo(cx - r * 0.22, cy - r * 0.55); ctx.lineTo(cx + r * 0.22, cy - r * 0.55); ctx.closePath(); ctx.fill();
+      } else if (id === "potato") {   // spud + barrel
+        ctx.fillStyle = rgba(color, 0.85); ctx.beginPath(); ctx.ellipse(cx, cy - r * 0.4, r * 0.42, r * 0.32, 0, 0, TAU); ctx.fill();
+        ctx.strokeStyle = color; ctx.beginPath(); ctx.moveTo(cx - r * 0.5, cy + r * 0.9); ctx.lineTo(cx + r * 0.5, cy + r * 0.1); ctx.lineWidth = Math.max(2, s * 0.16); ctx.stroke(); ctx.lineWidth = Math.max(1.3, s * 0.1);
+      } else if (id === "cherrybomb") {   // round bomb + fuse spark
+        ctx.fillStyle = rgba(color, 0.8); ctx.beginPath(); ctx.arc(cx, cy + r * 0.25, r * 0.62, 0, TAU); ctx.fill();
+        ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(cx, cy + r * 0.25, r * 0.62, 0, TAU); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + r * 0.3, cy - r * 0.3); ctx.quadraticCurveTo(cx + r * 0.7, cy - r * 0.7, cx + r * 0.4, cy - r * 0.95); ctx.stroke();
+        ctx.fillStyle = "#fff1b0"; ctx.beginPath(); ctx.arc(cx + r * 0.4, cy - r * 1.0, r * 0.18, 0, TAU); ctx.fill();
       }
       ctx.restore();
     }

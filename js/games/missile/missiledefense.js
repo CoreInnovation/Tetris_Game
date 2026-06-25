@@ -80,18 +80,23 @@
   M.STREAKS = STREAKS;
 
   // ---- MILITIA UPGRADES: a SEPARATE set of buffs for the townsfolk's little guns (not your weapons, not killstreaks) ----
-  // Collected from PERSON-marked pickups, held up to TOWN_MAX(4). 5 wild defense weapons the crowd auto-fires at
-  // incoming threats + 2 enhancers (RANGE SCOPE reaches farther & fires faster, AMMO CRATE = more shots per volley).
-  // Enhancers level up if re-collected (still one slot). Each weapon arrives as the waves climb (minWave).
-  const TOWN_MAX = 4, TOWN_LVL_MAX = 4;
+  // Earned from falling PERSON-marked pods, held up to TOWN_MAX(8). 9 wild auto-fire weapons (each `proj`-typed + a base
+  // `cnt`) the crowd fires at in-range threats + 2 enhancers (RANGE SCOPE = farther/faster, AMMO CRATE = more per volley).
+  // Progressive: weak ones drop early (low minWave), strong ones are rare/late. Throughput is bounded by the volley cadence
+  // (see _townFire / the volley loop) — holding more weapons = VARIETY, not more total firepower, so it can't outpace you.
+  const TOWN_MAX = 8, TOWN_LVL_MAX = 4;
   const TOWN_UPGRADES = [
-    { id: "buckshot", name: "BUCKSHOT",       short: "BUCK", kind: "weapon", minWave: 2, range: 300, sfx: "launch",    color: "#ffd24a" },   // fans a spread of pellets
-    { id: "rockets",  name: "BOTTLE ROCKETS", short: "RKT",  kind: "weapon", minWave: 3, range: 470, sfx: "eject",     color: "#ff7a3a" },   // arcs up, bursts into a firework
-    { id: "molotov",  name: "MOLOTOVS",       short: "MLTV", kind: "weapon", minWave: 4, range: 360, sfx: "artillery", color: "#ff5a2a" },   // lobs a bottle -> fire patch
-    { id: "bees",     name: "ANGRY BEES",     short: "BEES", kind: "weapon", minWave: 5, range: 380, sfx: "ufo",       color: "#ffe14d" },   // releases homing stingers
-    { id: "tesla",    name: "TESLA FENCE",    short: "FNCE", kind: "weapon", minWave: 6, range: 165, sfx: "zap",       color: "#b388ff" },   // chain-lightning between threats
-    { id: "range",    name: "RANGE SCOPE",    short: "RNG",  kind: "range",  minWave: 2,             sfx: "select",     color: "#7afcff" },   // +reach, +fire rate
-    { id: "ammo",     name: "AMMO CRATE",     short: "AMMO", kind: "multi",  minWave: 3,             sfx: "select",     color: "#9aff6a" }    // +shots per volley, more cities fire
+    { id: "slingshot",  name: "SLINGSHOTS",     short: "SLNG", kind: "weapon", proj: "pellet",  cnt: 1, minWave: 2,  range: 260, sfx: "launch",    color: "#cfd24a" },   // weakest: a single pebble
+    { id: "buckshot",   name: "BUCKSHOT",       short: "BUCK", kind: "weapon", proj: "pellet",  cnt: 2, minWave: 3,  range: 300, sfx: "launch",    color: "#ffd24a" },   // fans a spread of pellets
+    { id: "crossbow",   name: "CROSSBOWS",      short: "XBOW", kind: "weapon", proj: "pellet",  cnt: 1, minWave: 4,  range: 470, sfx: "rail",      color: "#7afcff" },   // one precise long-range bolt
+    { id: "rockets",    name: "BOTTLE ROCKETS", short: "RKT",  kind: "weapon", proj: "rocket",  cnt: 1, fw: 24, minWave: 5,  range: 470, sfx: "eject",     color: "#ff7a3a" },   // arcs up, bursts into a firework
+    { id: "bees",       name: "ANGRY BEES",     short: "BEES", kind: "weapon", proj: "bee",     cnt: 1, minWave: 6,  range: 380, sfx: "ufo",       color: "#ffe14d" },   // releases homing stingers
+    { id: "potato",     name: "POTATO CANNON",  short: "SPUD", kind: "weapon", proj: "rocket",  cnt: 1, fw: 20, minWave: 7,  range: 360, sfx: "artillery", color: "#d9a441" },   // lobs a spud -> small burst
+    { id: "molotov",    name: "MOLOTOVS",       short: "MLTV", kind: "weapon", proj: "molotov", cnt: 1, minWave: 8,  range: 360, sfx: "artillery", color: "#ff5a2a" },   // lobs a bottle -> fire patch
+    { id: "cherrybomb", name: "CHERRY BOMBS",   short: "CHRY", kind: "weapon", proj: "rocket",  cnt: 1, fw: 30, minWave: 9,  range: 330, sfx: "boom",      color: "#ff4d6a" },   // a bigger banger
+    { id: "tesla",      name: "TESLA FENCE",    short: "FNCE", kind: "weapon", proj: "tesla",   cnt: 2, minWave: 10, range: 165, sfx: "zap",       color: "#b388ff" },   // chain-lightning between threats
+    { id: "range",      name: "RANGE SCOPE",    short: "RNG",  kind: "range",  minWave: 3,             sfx: "select",     color: "#7afcff" },   // +reach, +fire rate
+    { id: "ammo",       name: "AMMO CRATE",     short: "AMMO", kind: "multi",  minWave: 4,             sfx: "select",     color: "#9aff6a" }    // +shots per volley, more cities fire
   ];
   const TUMAP = {}; TOWN_UPGRADES.forEach(u => TUMAP[u.id] = u);
   M.TOWN_UPGRADES = TOWN_UPGRADES;
@@ -180,7 +185,7 @@
       this.multishot = 1; this.multishotT = 0;
       // ---- MILITIA (townsfolk) upgrades — tracked entirely separate from weapons/killstreaks ----
       this.townShots = []; this.townUpgrades = []; this.townUnlocked = {}; this.townRangeLvl = 0; this.townMultiLvl = 0; this.townFireT = 1400; this.militiaSlots = [];
-      if (this.dev) { this.townUpgrades = ["buckshot", "rockets", "molotov", "bees"]; this.townRangeLvl = 1; this.townMultiLvl = 1; TOWN_UPGRADES.forEach(u => { this.townUnlocked[u.id] = true; }); }
+      if (this.dev) { this.townUpgrades = ["slingshot", "buckshot", "crossbow", "rockets", "bees", "potato", "molotov", "cherrybomb"]; this.townRangeLvl = 1; this.townMultiLvl = 1; TOWN_UPGRADES.forEach(u => { this.townUnlocked[u.id] = true; }); }
       this.tracers = []; this.sirenT = 0; this.crowdT = 0; this._prevPanic = false; this.peopleCdT = 0; this.armyCdT = 0;
       this.statKills = {}; this.statPow = {};   // balance instrumentation: kills by source + powerup spawns by id/category
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
@@ -235,7 +240,7 @@
       this.dev = !this.dev;
       if (this.dev) {
         WEAPONS.forEach(w => { this.unlocked[w.id] = true; });
-        this.townUpgrades = ["buckshot", "rockets", "molotov", "bees"]; this.townRangeLvl = Math.max(1, this.townRangeLvl); this.townMultiLvl = Math.max(1, this.townMultiLvl); TOWN_UPGRADES.forEach(u => { this.townUnlocked[u.id] = true; });
+        this.townUpgrades = ["slingshot", "buckshot", "crossbow", "rockets", "bees", "potato", "molotov", "cherrybomb"]; this.townRangeLvl = Math.max(1, this.townRangeLvl); this.townMultiLvl = Math.max(1, this.townMultiLvl); TOWN_UPGRADES.forEach(u => { this.townUnlocked[u.id] = true; });
       } else {
         WEAPONS.forEach(w => { this.unlocked[w.id] = false; }); this.collected.forEach(id => { this.unlocked[id] = true; }); if (!this.unlocked[this.weapon]) this.weapon = "interceptor";
       }
@@ -470,8 +475,8 @@
       const townPool = TOWN_UPGRADES.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
       const cats = [];
       if (lockedW.length) cats.push(["weapon", 6]);
-      if (this.wave >= SUPPORT_MIN_WAVE) cats.push(["mult", 2]);   // multi-fire = later-game support
-      if (townPool.length && this.wave >= SUPPORT_MIN_WAVE) cats.push(["town", 3]);   // militia/base upgrades = later-game support
+      if (townPool.length) cats.push(["town", 3]);   // militia drops are progressive via each upgrade's own minWave (weak ones early, strong rare/late)
+      if (this.wave >= SUPPORT_MIN_WAVE) cats.push(["mult", 2]);   // multi-fire stays a later-game support drop
       if (!cats.length) cats.push(["mult", 2]);   // safety: always have something to drop
       let total = cats.reduce((a, c) => a + c[1], 0), r = Math.random() * total, pick = cats[0][0];
       for (const c of cats) { if (r < c[1]) { pick = c[0]; break; } r -= c[1]; }
@@ -563,20 +568,21 @@
       if (!tgt) return false;   // ALL town weapons need a threat actually within reach (no firing into empty sky)
       this.audio.play(u.sfx);
       if (this.theme.effects.particles) this.particles.emit({ x: cx, y: by, count: 5, colors: [col, "#ffffff"], speedMin: 30, speedMax: 150, angleMin: -Math.PI * 0.85, angleMax: -Math.PI * 0.15, gravity: 120, drag: 1.2, sizeMin: 1.4, sizeMax: 3, lifeMin: 0.15, lifeMax: 0.4, glow: this.theme.effects.glow, shape: "circle" });
-      if (id === "buckshot") {
-        const n = 2 + Math.floor(this.townMultiLvl / 2) + extraShots, base = Math.atan2((tgt.y) - by, tgt.x - cx);
-        for (let i = 0; i < n; i++) { const a = base + (i - (n - 1) / 2) * 0.14 + rand(-0.04, 0.04), sp = rand(620, 720); this.townShots.push({ type: "pellet", x: cx, y: by, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.4 * rangeMul + 0.2, color: col }); }
-      } else if (id === "rockets") {
-        const n = 1 + Math.floor(this.townMultiLvl / 3) + (extraShots > 1 ? 1 : 0);
-        for (let i = 0; i < Math.max(1, n); i++) { const t2 = this._townNearest(cx + rand(-30, 30), by, range) || tgt; this.townShots.push({ type: "rocket", x: cx + rand(-8, 8), y: by, tx: t2.x, ty: t2.y, spd: 540, color: col, spin: rand(0, 6.28) }); }
-      } else if (id === "molotov") {
-        const aimx = tgt ? tgt.x : cx + rand(-160, 160), n = 1 + Math.floor(this.townMultiLvl / 3);
-        for (let i = 0; i < n; i++) { const tx = aimx + rand(-30, 30) * i, dx = tx - cx; this.townShots.push({ type: "molotov", x: cx, y: by, vx: dx / 0.95 * 0.5, vy: -rand(360, 460), spin: rand(0, 6.28), color: col, r: rand(28, 38) * rangeMul }); }
-      } else if (id === "bees") {
-        const n = 1 + Math.floor(this.townMultiLvl / 2) + extraShots;
+      const ml = this.townMultiLvl, cnt = u.cnt || 1, proj = u.proj;
+      if (proj === "pellet") {
+        const n = cnt + Math.floor(ml / 2) + extraShots, base = Math.atan2(tgt.y - by, tgt.x - cx), spreadA = cnt > 1 ? 0.14 : 0.05;
+        for (let i = 0; i < n; i++) { const a = base + (i - (n - 1) / 2) * spreadA + rand(-0.04, 0.04), sp = rand(620, 720); this.townShots.push({ type: "pellet", x: cx, y: by, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.4 * rangeMul + 0.2, color: col }); }
+      } else if (proj === "rocket") {
+        const n = cnt + (extraShots > 1 ? 1 : 0);
+        for (let i = 0; i < Math.max(1, n); i++) { const t2 = this._townNearest(cx + rand(-30, 30), by, range) || tgt; this.townShots.push({ type: "rocket", x: cx + rand(-8, 8), y: by, tx: t2.x, ty: t2.y, spd: 540, color: col, spin: rand(0, 6.28), fw: u.fw || 24 }); }
+      } else if (proj === "molotov") {
+        const n = cnt + Math.floor(ml / 3);
+        for (let i = 0; i < n; i++) { const tx = tgt.x + rand(-30, 30) * i, dx = tx - cx; this.townShots.push({ type: "molotov", x: cx, y: by, vx: dx / 0.95 * 0.5, vy: -rand(360, 460), spin: rand(0, 6.28), color: col, r: rand(28, 38) * rangeMul }); }
+      } else if (proj === "bee") {
+        const n = cnt + Math.floor(ml / 2) + extraShots;
         for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + rand(-0.8, 0.8); this.townShots.push({ type: "bee", x: cx + rand(-10, 10), y: by - rand(0, 8), heading: a, spd: rand(230, 290), fuse: 2.0 + rangeMul * 0.3, wig: rand(0, 6.28), color: col }); }
-      } else if (id === "tesla") {
-        this._chainZap(cx, by - 4, col, 2 + Math.floor(this.townMultiLvl / 2));   // chain-lightning leaps between nearby threats
+      } else if (proj === "tesla") {
+        this._chainZap(cx, by - 4, col, cnt + Math.floor(ml / 2));   // chain-lightning leaps between nearby threats
         if (this.theme.effects.shake) this._shake(3);
       }
       return true;
@@ -743,8 +749,8 @@
     }
 
     // a townsfolk bottle-rocket bursts into a colorful firework — the _blast handles the kills, the sparks are the show
-    _fireworkBurst(x, y, color) {
-      this._blast(x, y, 24, color);
+    _fireworkBurst(x, y, color, blast) {
+      this._blast(x, y, blast || 24, color);
       if (this.theme.effects.particles) this.particles.emit({ x: x, y: y, count: 30,
         colors: ["#ff4d4d", "#ffd24a", "#5ad1ff", "#9aff6a", "#ff7adf", "#ffffff"], speedMin: 60, speedMax: 320,
         gravity: 120, drag: 0.9, sizeMin: 1.5, sizeMax: 3.6, lifeMin: 0.4, lifeMax: 1.1, glow: this.theme.effects.glow, shape: "circle", spin: 8 });
@@ -1123,11 +1129,11 @@
         this.townFireT -= dt;
         if (this.townFireT <= 0) {
           const rangeMul = 1 + this.townRangeLvl * 0.30;
-          const baseCd = Math.max(1100, 2400 - this.townMultiLvl * 150 - this.townRangeLvl * 90);   // RANGE + AMMO quicken it, but it stays a SUPPORT cadence (not a carry)
-          this.townFireT = baseCd * rand(0.8, 1.2);
+          const baseCd = Math.max(1500, 2600 - this.townMultiLvl * 110 - this.townRangeLvl * 70);   // SUPPORT cadence (floored slow) — RANGE/AMMO only nudge it
+          this.townFireT = baseCd * rand(0.85, 1.15);
           const alive = this.cities.filter(c => c.alive);
           if (alive.length) {
-            const volleys = 1 + Math.floor(this.townMultiLvl / 3);   // AMMO CRATE: more cities open up at once
+            const volleys = 1;   // ONE volley per cadence — many weapons = VARIETY, not more total firepower (so auto-defense can't outpace the wave)
             for (let v = 0; v < volleys; v++) {
               const wid = townWeapons[(Math.random() * townWeapons.length) | 0];
               const reach = (TUMAP[wid].range || 320) * rangeMul;
@@ -1156,7 +1162,7 @@
         } else if (t.type === "rocket") {
           const dx = t.tx - t.x, dy = t.ty - t.y, d = Math.hypot(dx, dy) || 1, step = t.spd * s; t.spin += s * 12;
           if (this.theme.effects.particles) this.particles.emit({ x: t.x, y: t.y, count: 1, colors: ["#fff1b0", t.color, "#ff3a1a"], speedMin: 4, speedMax: 26, gravity: 30, drag: 1.4, sizeMin: 1.4, sizeMax: 3, lifeMin: 0.18, lifeMax: 0.45, glow: this.theme.effects.glow, shape: "circle" });
-          if (d <= step + 6 || this._townNearest(t.x, t.y, 16)) { this._fireworkBurst(t.x, t.y, t.color); dead = true; }
+          if (d <= step + 6 || this._townNearest(t.x, t.y, 16)) { this._fireworkBurst(t.x, t.y, t.color, t.fw); dead = true; }
           else { t.x += dx / d * step; t.y += dy / d * step; }
         } else if (t.type === "molotov") {
           t.vy += 620 * s; t.x += t.vx * s; t.y += t.vy * s; t.spin += s * 10;
