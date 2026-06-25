@@ -97,6 +97,19 @@
     }
 
     // ----------------- hero -----------------
+    // Orbital Strike incoming-impact marker: a shrinking target ring + a streak falling from the sky
+    drawStrike(ctx, theme, st, now) {
+      const s = this.w2s(st.wx, st.wy), col = st.color || "#ff7a2a", k = Math.max(0, Math.min(1, st.delay / 0.5));
+      ctx.save();
+      if (theme.effects.glow) { ctx.shadowBlur = 12; ctx.shadowColor = col; }
+      ctx.strokeStyle = rgba(col, 0.85); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.ellipse(s.x, s.y, st.blast * (0.4 + k * 0.6), st.blast * (0.4 + k * 0.6) * 0.5, 0, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(s.x, s.y, st.blast * 0.18, st.blast * 0.18 * 0.5, 0, 0, TAU); ctx.stroke();
+      // falling streak
+      ctx.globalAlpha = 0.7; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(s.x, s.y - 8 - (1 - k) * 220); ctx.lineTo(s.x, s.y - 8 - (1 - k) * 120); ctx.stroke();
+      ctx.restore();
+    }
+
     drawPlayer(ctx, theme, pl, now) {
       const s = this.w2s(pl.wx, pl.wy), p = theme.palette;
       const blink = pl.invuln > 0 && (Math.floor(now / 90) % 2 === 0);
@@ -108,6 +121,13 @@
       ctx.beginPath(); ctx.ellipse(0, 0, hr, hr * 0.5, 0, -Math.PI / 2, -Math.PI / 2 + TAU * hpF); ctx.stroke(); ctx.shadowBlur = 0;
       if (pl.maxStam > 0) { const st = Math.max(0, pl.stam / pl.maxStam); ctx.strokeStyle = rgba("#5ad1ff", 0.85); ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, 0, hr + 5, (hr + 5) * 0.5, 0, Math.PI / 2, Math.PI / 2 + TAU * st); ctx.stroke(); }
       ctx.restore();
+      // energy SHIELD bubble — visible armor around the player
+      if (pl.shield > 0 && pl.maxShield > 0) {
+        const sf = pl.shield / pl.maxShield, flick = pl.shieldHit > 0 ? 0.9 : (0.3 + 0.25 * sf + 0.12 * Math.sin(now / 200));
+        ctx.save(); ctx.translate(s.x, s.y - 16); ctx.globalAlpha = flick; ctx.strokeStyle = "#7fdcff"; ctx.lineWidth = 2;
+        if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = "#5ad1ff"; }
+        ctx.beginPath(); ctx.arc(0, 0, 26, 0, TAU); ctx.stroke(); ctx.restore();
+      }
       // body
       ctx.save(); ctx.translate(s.x, s.y);
       const bob = pl.moving ? Math.sin(pl.walk) * 2 : 0, col = p.player, h = 30, face = Math.cos(pl.aim) >= 0 ? 1 : -1;
@@ -136,10 +156,17 @@
       let col = def.color; if (e.buffT > 0) col = lighten(col, 0.28);
       const flash = e.hitFlash > 0, body = flash ? "#ffffff" : col;
       const skin = flash ? "#ffffff" : lighten(col, 0.16), dark = darken(col, 0.32);
+      // ELITE: a glowing champion ring + crown so it reads as a dangerous, loot-dropping target
+      if (e.elite) {
+        const ec = "#ffd23f", pr = 0.6 + 0.4 * Math.sin(now / 160 + e.id);
+        ctx.save(); ctx.translate(s.x, s.y); ctx.globalAlpha = 0.45 + 0.3 * pr; ctx.strokeStyle = ec; ctx.lineWidth = 2.5;
+        if (theme.effects.glow) { ctx.shadowBlur = 14; ctx.shadowColor = ec; }
+        ctx.beginPath(); ctx.ellipse(0, 0, e.radius * 1.25, e.radius * 0.7, 0, 0, TAU); ctx.stroke(); ctx.restore();
+      }
       ctx.save(); ctx.translate(s.x, s.y);
       if (e.flip < 0) ctx.scale(-1, 1);
       ctx.scale(e.xj || 1, 1);
-      if (theme.effects.glow && (def.role === "boss")) { ctx.shadowBlur = 18; ctx.shadowColor = col; }
+      if (theme.effects.glow && (def.role === "boss" || e.elite)) { ctx.shadowBlur = 18; ctx.shadowColor = e.elite ? "#ffd23f" : col; }
       const role = def.role, bob = Math.sin(e.bob) * 1.7, ls = Math.sin(e.bob) * 2.4;
       ctx.lineCap = "round";
 
@@ -349,17 +376,28 @@
       ctx.fillText(String(d.score).padStart(7, "0"), 18, 12);
       ctx.shadowBlur = 0; ctx.font = "600 13px " + theme.fonts.ui; ctx.fillStyle = p.textDim; ctx.textAlign = "right";
       ctx.fillText("WAVE " + d.wave + "   LVL " + d.level, this.w - 18, 14);
-      if (d.combo > 1) { ctx.font = "800 20px " + theme.fonts.ui; ctx.fillStyle = p.danger; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = p.danger; } ctx.fillText("x" + d.combo + " COMBO", this.w - 18, 34); ctx.shadowBlur = 0; }
+      let ry = 34;
+      if (d.combo > 1) { ctx.font = "800 20px " + theme.fonts.ui; ctx.fillStyle = p.danger; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = p.danger; } ctx.fillText("x" + d.combo + " COMBO", this.w - 18, ry); ctx.shadowBlur = 0; ry += 22; }
+      if (d.mod) { ctx.font = "800 13px " + theme.fonts.ui; ctx.fillStyle = d.mod.color; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = d.mod.color; } ctx.fillText("⚠ " + d.mod.name.split(" — ")[0], this.w - 18, ry); ctx.shadowBlur = 0; }
+      // HP + SHIELD bars (top-left, under the score) — armor is FELT
+      const pl = d.pl;
+      if (pl) {
+        const bx0 = 18, bw0 = 168, hy = 44;
+        ctx.fillStyle = rgba("#000", 0.5); ctx.fillRect(bx0, hy, bw0, 7);
+        ctx.fillStyle = (pl.hp / pl.maxHp) > 0.3 ? "#46f06a" : p.danger; ctx.fillRect(bx0, hy, bw0 * Math.max(0, pl.hp / pl.maxHp), 7);
+        if (pl.maxShield > 0) { ctx.fillStyle = rgba("#000", 0.5); ctx.fillRect(bx0, hy + 9, bw0, 5); ctx.fillStyle = "#5ad1ff"; if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = "#5ad1ff"; } ctx.fillRect(bx0, hy + 9, bw0 * Math.max(0, pl.shield / pl.maxShield), 5); ctx.shadowBlur = 0; }
+      }
       const bw = Math.min(this.w - 36, 520), bx = (this.w - bw) / 2, by = this.h - 16, xpF = Math.max(0, Math.min(1, d.xpF));
       ctx.fillStyle = rgba("#000", 0.45); ctx.fillRect(bx, by, bw, 7);
       ctx.fillStyle = p.accent; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = p.accent; } ctx.fillRect(bx, by, bw * xpF, 7); ctx.shadowBlur = 0;
       ctx.restore();
     }
 
-    drawWeaponTag(ctx, theme, weapon, owned) {
+    drawWeaponTag(ctx, theme, weapon, owned, level) {
       const p = theme.palette; ctx.save(); ctx.textBaseline = "bottom"; ctx.textAlign = "left"; ctx.font = "700 13px " + theme.fonts.ui;
       const col = (weapon && weapon.color) || p.accent; ctx.fillStyle = col; if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; }
-      ctx.fillText("◢ " + (weapon ? weapon.name : "") + "   (" + owned + ")   [Q/E swap]", 18, this.h - 26);
+      const lv = level ? "  Lv" + level : "";
+      ctx.fillText("◢ " + (weapon ? weapon.name : "") + lv + "   (" + owned + ")   [Q/E swap]", 18, this.h - 26);
       ctx.restore();
     }
 

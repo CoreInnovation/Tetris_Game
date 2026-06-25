@@ -20,6 +20,8 @@
   const BASE_SPEED = 150;               // player base world px/s (pre-MOVE)
   const ARENA = 1500;                   // player roam radius (world px)
   const MAX_ENEMIES = 150;
+  const MAXW = 8;                       // max weapon level
+  const SHIELD_REGEN = 16;              // energy shield regen/sec after a no-hit pause
 
   // ---------------- enemy roster ----------------
   // speed/dmg/radius in world px; introWave compressed for arcade pacing.
@@ -52,7 +54,8 @@
     { id: "rot",      name: "Plague Censer",      tier: 8,  fireType: "dot_field",  dmg: 18, fireRate: 1000, range: 260, projSpeed: 260, cloud: 4, color: "#9d4edd", draw: "blob" },
     { id: "rail",     name: "Voidlance Railgun",  tier: 9,  fireType: "piercing",   dmg: 60, fireRate: 1300, range: 640, projSpeed: 0,   color: "#ff3df0" },
     { id: "turret",   name: "Bolt Buddy Turret",  tier: 10, fireType: "summon",     dmg: 20, fireRate: 0,    range: 360, projSpeed: 520, max: 2, color: "#3df0a0" },
-    { id: "scythe",   name: "Reaper's Backhand",  tier: 10, fireType: "melee_arc",  dmg: 75, fireRate: 650,  range: 140, projSpeed: 0,   half: 1.9, knock: 160, lifesteal: 1, color: "#e0e0ff" }
+    { id: "scythe",   name: "Reaper's Backhand",  tier: 10, fireType: "melee_arc",  dmg: 75, fireRate: 650,  range: 140, projSpeed: 0,   half: 1.9, knock: 160, lifesteal: 1, color: "#e0e0ff" },
+    { id: "orbital",  name: "Orbital Strike",     tier: 11, fireType: "orbital",     dmg: 46, fireRate: 1500, range: 560, projSpeed: 0,   strikes: 3, blast: 76, color: "#ff7a2a", draw: "blob" }
   ];
   const WMAP = {}; WEAPONS.forEach(w => WMAP[w.id] = w);
   Z.WEAPONS = WMAP;
@@ -60,6 +63,8 @@
   // ---------------- attributes ----------------
   const ATTRS = [
     { id: "max_health", name: "Iron Hide",         icon: "❤", max: 7, short: "+20 max HP (and heal up)" },
+    { id: "armor",      name: "Aegis Plating",     icon: "🛡", max: 6, short: "+35 energy shield (auto-regens)" },
+    { id: "power",      name: "Heavy Rounds",      icon: "💢", max: 6, short: "+12% ALL weapon damage" },
     { id: "move_speed", name: "Fleet Foot",        icon: "🥾", max: 6, short: "+8% move speed" },
     { id: "stamina",    name: "Second Wind",       icon: "💨", max: 5, short: "+25 stamina (more dashes)" },
     { id: "fire_rate",  name: "Trigger Frenzy",    icon: "🔥", max: 6, short: "+10% fire rate" },
@@ -72,15 +77,25 @@
 
   // ---------------- powerups ----------------
   const POWERUPS = [
-    { id: "med",        name: "Med-Diamond",   icon: "✚", color: "#46f06a", weight: 40 },
-    { id: "adrenal",    name: "Adrenal Surge", icon: "⚡", color: "#ff9a2a", weight: 18 },
-    { id: "frost",      name: "Frost Nova",    icon: "❄", color: "#8fd9ff", weight: 14 },
-    { id: "overcharge", name: "Overcharge",    icon: "🔋", color: "#7a6bff", weight: 12 },
-    { id: "boom",       name: "Boom Barrel",   icon: "💣", color: "#ff4a3a", weight: 9 },
+    { id: "med",        name: "Med-Diamond",   icon: "✚", color: "#46f06a", weight: 36 },
+    { id: "shield",     name: "Aegis Cell",    icon: "🛡", color: "#5ad1ff", weight: 18 },
+    { id: "adrenal",    name: "Adrenal Surge", icon: "⚡", color: "#ff9a2a", weight: 16 },
+    { id: "berserk",    name: "Berserk Serum", icon: "💢", color: "#ff4d6a", weight: 13 },
+    { id: "frost",      name: "Frost Nova",    icon: "❄", color: "#8fd9ff", weight: 12 },
+    { id: "overcharge", name: "Overcharge",    icon: "🔋", color: "#7a6bff", weight: 10 },
+    { id: "boom",       name: "Boom Barrel",   icon: "💣", color: "#ff4a3a", weight: 8 },
     { id: "gold",       name: "Gold Cache",    icon: "★", color: "#ffd24d", weight: 5 }
   ];
   const PMAP = {}; POWERUPS.forEach(p => PMAP[p.id] = p);
   Z.POWERUPS = PMAP;
+
+  // ---------------- wave modifiers (felt escalation) ----------------
+  const WAVE_MODS = [
+    { id: "frenzy",  name: "FRENZY — they're fast",   color: "#ff9a2a", spd: 1.32, hp: 1,    elite: 1 },
+    { id: "swarm",   name: "SWARM — endless horde",   color: "#9dff3c", spd: 1,    hp: 0.82, elite: 1 },
+    { id: "tanky",   name: "BULWARK — armored dead",  color: "#8a8d91", spd: 0.92, hp: 1.5,  elite: 1 },
+    { id: "elites",  name: "ELITE HUNT — champions",  color: "#ffd23f", spd: 1.05, hp: 1.1,  elite: 3.2 }
+  ];
 
   // ---------------- music ----------------
   function song(def) {
@@ -115,6 +130,7 @@
       this.theme = Z.getTheme(ctx.storage.get("zombies:theme", "modern"));
       this.songIdx = Math.min(SONGS.length - 1, Math.max(0, ctx.storage.get("zombies:song", 0) | 0));
       this.aimMode = ctx.storage.get("zombies:aim", "auto");   // "auto" = lock+fire nearest | "manual" = you aim (mouse / aim-stick)
+      this.oneThumb = !!ctx.storage.get("zombies:onethumb", 0); // mobile: locked stick (one place) + tap-to-dash on the same thumb
       this.pointerInput = true;
       this.dev = false;
       this._unsub = []; this.paused = false; this._now = 0;
@@ -134,16 +150,19 @@
       this.score = 0; this.level = 1; this.xp = 0; this.xpNeed = 50; this._pendingLevels = 0;
       this.combo = 1; this.comboKills = 0; this.comboT = 0;
       this.wave = 0; this.spawnQueue = []; this.spawnT = 0; this.spawnGap = 900; this.breatherT = 0; this.betweenWaves = false;
-      this.player = { wx: 0, wy: 0, hp: 100, maxHp: 100, stam: 100, maxStam: 100, aim: 0, radius: 15, invuln: 0, dashT: 0, dashCd: 0, hurtCd: 0, walk: 0, moving: false, flip: 1, regenPause: 0 };
+      this.player = { wx: 0, wy: 0, hp: 100, maxHp: 100, stam: 100, maxStam: 100, shield: 0, maxShield: 0, shieldPause: 0, shieldHit: 0, aim: 0, radius: 15, invuln: 0, dashT: 0, dashCd: 0, hurtCd: 0, walk: 0, moving: false, flip: 1, regenPause: 0 };
       this.attr = {}; ATTRS.forEach(a => this.attr[a.id] = 0);
       this.weapons = ["popgun"]; this.weapon = "popgun"; this.fireCd = 0; this._popShot = 0; this.fuel = 100;
+      this.wlvl = {}; this.strikes = [];   // per-weapon levels + Orbital Strike pending impacts
       if (this.dev) this.weapons = WEAPONS.map(w => w.id);
+      this.weapons.forEach(id => { this.wlvl[id] = 1; });
+      this.waveMod = null;   // current wave modifier (frenzy / swarm / tanky / elite hunt)
       this.enemies = []; this.bullets = []; this.eproj = []; this.pickups = [];
       this.fields = []; this.decals = []; this.turrets = []; this.dmgNums = [];
       this.zaps = []; this.rails = []; this.sweeps = []; this.shocks = []; this.toasts = [];
       this.orbit = { count: 0, ang: 0, r: 92, hitCd: {} };
       this.beam = null;
-      this.boosts = { adrenal: 0, overcharge: 0, frostSlow: 0 };
+      this.boosts = { adrenal: 0, overcharge: 0, frostSlow: 0, berserk: 0 };
       this.boss = null; this._bossMusic = false; this._lastMoveDir = null;
       this.shakeMag = 0; this._eid = 1;
       this.camX = 0; this.camY = 0; this._lastOx = null; this._lastOy = null;
@@ -156,12 +175,18 @@
     // ---------------- derived stats ----------------
     _maxHp() { return 100 + this.attr.max_health * 20; }
     _maxStam() { return 100 + this.attr.stamina * 25; }
+    _maxShield() { return this.attr.armor * 35; }
     _speedMult() { return (1 + this.attr.move_speed * 0.08) * (this.boosts.adrenal > 0 ? 1.25 : 1); }
     _fireMult() { return Math.pow(0.90, this.attr.fire_rate) * (this.boosts.adrenal > 0 ? 0.72 : 1); }
-    _critChance() { return this.attr.crit * 0.06; }
-    _lifesteal() { return this.attr.lifesteal * 0.02; }
+    _critChance() { return this.attr.crit * 0.06 + (this.boosts.berserk > 0 ? 0.12 : 0); }
+    _lifesteal() { return this.attr.lifesteal * 0.02 + (this.boosts.berserk > 0 ? 0.04 : 0); }
     _magnetR() { return 40 + this.attr.magnet * 45; }
     _luck() { return this.attr.luck * 0.12; }
+    // ---- weapon leveling: every level is FELT — more damage, faster, and extra projectiles ----
+    _lvlOf(id) { return this.wlvl[id] || 1; }
+    _wdmg(w) { return w.dmg * (1 + (this._lvlOf(w.id) - 1) * 0.34) * (1 + this.attr.power * 0.12) * (this.boosts.berserk > 0 ? 2 : 1); }
+    _wfireMult(w) { return this._fireMult() * Math.pow(0.95, this._lvlOf(w.id) - 1); }
+    _wextra(w) { return Math.floor((this._lvlOf(w.id) - 1) / 2); }   // +1 projectile/pellet/blade/chain every 2 levels
 
     // ---------------- menus / chrome ----------------
     menus() {
@@ -170,7 +195,8 @@
         control: {
           profiles: [{ id: "auto", name: "Auto-aim (locks nearest)" }, { id: "manual", name: "Manual aim (mouse / aim-stick)" }],
           profile: this.aimMode,
-          setProfile: (id) => { self._setAimMode(id); }
+          setProfile: (id) => { self._setAimMode(id); },
+          toggles: this.shell.isTouch ? [{ id: "onethumb", name: "One-thumb stick (tap = dash)", on: this.oneThumb, set: (v) => self._setOneThumb(v) }] : undefined
         },
         music: { options: SONGS.map((s, i) => ({ id: i, name: s.name })), current: this.songIdx, set: (i) => { self.songIdx = i; self.shell.storage.set("zombies:song", i); self._applyMusic(); self._toast("♪ " + SONGS[i].name); } },
         skin: { options: Z.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id, set: (id) => { const t = Z.Themes.find(x => x.id === id); if (t) { self.theme = t; self.shell.storage.set("zombies:theme", id); if (!t.effects.particles) self.particles.clear(); } } }
@@ -179,7 +205,8 @@
     cycleTheme() { const l = Z.Themes; this.theme = l[(l.indexOf(this.theme) + 1) % l.length]; this.shell.storage.set("zombies:theme", this.theme.id); return this.theme.name; }
     _applyMusic() { this.audio.playMusic(SONGS[this.songIdx].song); }
     cycleMusic() { this._bossMusic = false; this.songIdx = (this.songIdx + 1) % SONGS.length; this.shell.storage.set("zombies:song", this.songIdx); this._applyMusic(); const n = SONGS[this.songIdx].name; this._toast("♪ " + n); return n; }
-    _setAimMode(id) { this.aimMode = id; this.shell.storage.set("zombies:aim", id); this._clearSticks(); this._toast(id === "auto" ? "AUTO-AIM" : "MANUAL AIM", true, this.theme.palette.accent); }
+    _setAimMode(id) { this.aimMode = id; this.shell.storage.set("zombies:aim", id); if (id === "manual") this.oneThumb = false; this._clearSticks(); this._toast(id === "auto" ? "AUTO-AIM" : "MANUAL AIM", true, this.theme.palette.accent); }
+    _setOneThumb(v) { this.oneThumb = !!v; this.shell.storage.set("zombies:onethumb", v ? 1 : 0); if (v && this.aimMode !== "auto") this._setAimMode("auto"); this._clearSticks(); this._toast(v ? "ONE-THUMB: drag to move, tap to dash" : "ONE-THUMB OFF", true, this.theme.palette.accent); }
     _toggleAim() { this._setAimMode(this.aimMode === "auto" ? "manual" : "auto"); }
     toggleDev() {
       this.dev = !this.dev;
@@ -231,9 +258,16 @@
         e.preventDefault(); this.introT = 0;
         for (const t of e.changedTouches) {
           const p = toLocal(t);
-          if (this.renderer.aimToggleHit(p.x, p.y)) { this._toggleAim(); continue; }        // tap the AIM pill to toggle
+          if (!this.oneThumb && this.renderer.aimToggleHit(p.x, p.y)) { this._toggleAim(); continue; }   // tap the AIM pill to toggle (off in one-thumb)
           if (this._inDash(p.x, p.y)) { this._dash(); continue; }                            // dash button (always present, bottom-right)
-          if (p.x < this._cssW * 0.5) { if (this.stick.id != null) continue; const s = this.stick; s.active = true; s.id = t.identifier; s.baseX = p.x; s.baseY = p.y; s.kx = p.x; s.ky = p.y; s.dx = 0; s.dy = 0; s.mag = 0; }
+          // ONE-THUMB: the stick LOCKS wherever you first touch (no recenter/jumping) and a quick TAP
+          // on that same thumb DASHES. Move + dodge with one finger. Otherwise the classic floating stick.
+          const leftZone = this.oneThumb ? (p.x < this._cssW * 0.78) : (p.x < this._cssW * 0.5);
+          if (leftZone) {
+            if (this.stick.id != null) continue; const s = this.stick;
+            s.active = true; s.id = t.identifier; s.baseX = p.x; s.baseY = p.y; s.kx = p.x; s.ky = p.y; s.dx = 0; s.dy = 0; s.mag = 0;
+            s.locked = !!this.oneThumb; s.t0 = this._now; s.sx0 = p.x; s.sy0 = p.y; s.moved = 0;
+          }
           else { // right side: manual -> aim stick (fires while held); auto -> dash tap
             if (this.aimMode === "manual") { if (this.aimStick.id != null) continue; const a = this.aimStick; a.active = true; a.id = t.identifier; a.baseX = p.x; a.baseY = p.y; a.kx = p.x; a.ky = p.y; a.dx = 0; a.dy = 0; a.mag = 0; }
             else this._dash();
@@ -246,14 +280,18 @@
           for (const s of [this.stick, this.aimStick]) {
             if (t.identifier !== s.id) continue;
             const p = toLocal(t); let vx = p.x - s.baseX, vy = p.y - s.baseY, d = Math.hypot(vx, vy);
-            if (d > STICK_MAX) { const nx = vx / d, ny = vy / d; s.baseX = p.x - nx * STICK_MAX; s.baseY = p.y - ny * STICK_MAX; vx = nx * STICK_MAX; vy = ny * STICK_MAX; d = STICK_MAX; }
+            if (s.locked) { s.moved = Math.max(s.moved || 0, Math.hypot(p.x - s.sx0, p.y - s.sy0)); }   // locked: base stays put (no jump), just track travel for tap detection
+            if (d > STICK_MAX) { const nx = vx / d, ny = vy / d; if (!s.locked) { s.baseX = p.x - nx * STICK_MAX; s.baseY = p.y - ny * STICK_MAX; } vx = nx * STICK_MAX; vy = ny * STICK_MAX; d = STICK_MAX; }
             s.kx = s.baseX + vx; s.ky = s.baseY + vy;
             if (d > 0.001) { s.dx = vx / d; s.dy = vy / d; } else { s.dx = 0; s.dy = 0; }
             s.mag = Math.min(1, d / STICK_MAX);
           }
         }
       };
-      const onEnd = (e) => { for (const t of e.changedTouches) { for (const s of [this.stick, this.aimStick]) { if (t.identifier === s.id) { s.active = false; s.id = null; s.mag = 0; } } } };
+      const onEnd = (e) => { for (const t of e.changedTouches) { for (const s of [this.stick, this.aimStick]) { if (t.identifier === s.id) {
+        if (s === this.stick && s.locked && (this._now - (s.t0 || 0)) < 280 && (s.moved || 0) < 24) this._dash();   // quick tap on the move thumb = DASH
+        s.active = false; s.id = null; s.mag = 0; s.locked = false;
+      } } } };
       canvas.addEventListener("touchstart", onStart, { passive: false });
       canvas.addEventListener("touchmove", onMove, { passive: false });
       canvas.addEventListener("touchend", onEnd, { passive: false });
@@ -294,12 +332,17 @@
         if (this.songIdx !== 2) { this._prevSong = this.songIdx; this.audio.playMusic(SONGS[2].song); this._bossMusic = true; }
       } else {
         if (this._bossMusic) { this._bossMusic = false; this._applyMusic(); }
-        const budget = Math.round(6 + this.wave * 2.6);
+        // WAVE MODIFIER — escalating, announced threats so progression is FELT (not just bigger numbers)
+        this.waveMod = null;
+        if (this.wave >= 4 && Math.random() < 0.5) this.waveMod = pick(WAVE_MODS);
+        let budget = Math.round(6 + this.wave * 2.6);
+        if (this.waveMod && this.waveMod.id === "swarm") budget = Math.round(budget * 1.7);
         for (let i = 0; i < budget; i++) this.spawnQueue.push({ key: this._rollEnemy() });
       }
       this.spawnGap = Math.max(260, 900 - this.wave * 40);
       this.spawnT = 400;
       if (this.wave > 1) this._toast("WAVE " + this.wave, true, this.theme.palette.danger);
+      if (this.waveMod) this._toast("⚠ " + this.waveMod.name, true, this.waveMod.color);
       this.audio.play("wavestart");
     }
 
@@ -329,8 +372,16 @@
       let hp = def.hp;
       if (def.role !== "boss") hp = Math.round(hp * (1 + (this.wave - 1) * 0.06 + Math.max(0, this.wave - 8) * 0.045));   // super-linear so the late horde isn't trivial
       else { const bossNum = Math.max(0, Math.floor(this.wave / 6) - 1); hp = Math.round(def.hp * (1 + bossNum * 0.6)); }   // 800 at wave 6, +60% each boss
+      const mod = this.waveMod;
+      if (def.role !== "boss" && mod) hp = Math.round(hp * mod.hp);
       if (opt && opt.hpScale) hp = Math.round(hp * opt.hpScale);
-      const e = { id: this._eid++, key: key, def: def, wx: wx, wy: wy, hp: hp, maxHp: hp, radius: def.radius, vx: 0, vy: 0, kvx: 0, kvy: 0, t: 0, bob: rand(0, TAU), xj: rand(0.9, 1.1), flip: 1, hitFlash: 0, slow: 0, buffT: 0, st: "track", stT: 0, atkT: rand(1, 3) };
+      // ELITE: a glowing champion — tanky, bigger, dangerous, and drops the good stuff. Earned kills feel great.
+      let elite = false, radius = def.radius;
+      if (!opt && def.role !== "boss" && def.role !== "swarm" && this.wave >= 5) {
+        const chance = Math.min(0.16, 0.02 + (this.wave - 5) * 0.012) * (mod ? mod.elite : 1);
+        if (Math.random() < chance) { elite = true; hp = Math.round(hp * 2.6); radius = Math.round(def.radius * 1.28); }
+      }
+      const e = { id: this._eid++, key: key, def: def, wx: wx, wy: wy, hp: hp, maxHp: hp, radius: radius, elite: elite, vx: 0, vy: 0, kvx: 0, kvy: 0, t: 0, bob: rand(0, TAU), xj: rand(0.9, 1.1), flip: 1, hitFlash: 0, slow: 0, buffT: 0, st: "track", stT: 0, atkT: rand(1, 3) };
       if (def.role === "boss") { e.phase = 0; e.atkMode = "none"; e.atkT = 2; this.boss = e; }
       if (def.role === "support") e.phaseA = 0.8;
       this.enemies.push(e); return e;
@@ -357,6 +408,7 @@
       this._updatePlayer(s);
       this._updateSpawns(dt);
       this._weaponTick(s);
+      this._updateStrikes(s);
       this._updateBullets(s);
       this._updateEnemies(s);
       this._updateEnemyProj(s);
@@ -399,6 +451,12 @@
       // stamina regen
       if (pl.regenPause <= 0 && pl.stam < this._maxStam()) pl.stam = Math.min(this._maxStam(), pl.stam + 20 * s);
       pl.maxStam = this._maxStam();
+      // energy shield: regenerates after a brief no-hit pause (armor that comes back)
+      pl.maxShield = this._maxShield();
+      if (pl.shieldHit > 0) pl.shieldHit -= s;
+      if (pl.shieldPause > 0) pl.shieldPause -= s;
+      else if (pl.shield < pl.maxShield) pl.shield = Math.min(pl.maxShield, pl.shield + SHIELD_REGEN * s);
+      if (pl.shield > pl.maxShield) pl.shield = pl.maxShield;
       // aim
       const target = this._aimTarget();
       this._aimT = target;
@@ -439,7 +497,7 @@
       // AUTO always fires; MANUAL fires while you direct it (mouse on desktop, aim-stick held on mobile)
       const firing = this.aimMode === "auto" ? true : (this.shell.isTouch ? this.aimStick.active : true);
       // passive: orbit blades (only while selected)
-      if (w.fireType === "orbit") { this.orbit.count = w.blades; this.orbit.r = w.range; this.orbit.ang += s * 3.2; this._orbitDamage(s, w); }
+      if (w.fireType === "orbit") { this.orbit.count = w.blades + this._wextra(w); this.orbit.r = w.range; this.orbit.ang += s * 3.2; this._orbitDamage(s, w); }
       else this.orbit.count = 0;
       // passive: turrets
       if (w.fireType === "summon") this._ensureTurrets(w);
@@ -453,21 +511,46 @@
       if (!firing) return;
       if (this.aimMode === "auto" && !this._aimT && w.fireType !== "melee_arc") return;   // auto: nothing to shoot at
       this._fire(w);
-      this.fireCd = w.fireRate * this._fireMult();
+      this.fireCd = w.fireRate * this._wfireMult(w);
     }
 
     _fire(w) {
-      const pl = this.player, a = pl.aim;
+      const pl = this.player, a = pl.aim, dmg = this._wdmg(w), ex = this._wextra(w);
       this.audio.play("zhit");
-      if (w.fireType === "projectile") { this._popShot = (this._popShot + 1) % 5; this._spawnBullet(pl.wx, pl.wy, a, w, { forceCrit: this._popShot === 0 }); }
-      else if (w.fireType === "spread") { for (let i = 0; i < w.pellets; i++) { const ang = a + (i / (w.pellets - 1) - 0.5) * w.fan; this._spawnBullet(pl.wx, pl.wy, ang, w, { knock: w.knock }); } }
-      else if (w.fireType === "boomerang") { this._spawnBullet(pl.wx, pl.wy, a, w, { boomerang: true, origin: { wx: pl.wx, wy: pl.wy }, phase: "out" }); }
-      else if (w.fireType === "homing") { for (let i = 0; i < w.count; i++) { const ang = a + (i - (w.count - 1) / 2) * 0.4; this._spawnBullet(pl.wx, pl.wy, ang, w, { homing: true, turn: w.turn }); } }
-      else if (w.fireType === "aoe_lob") { const t = this._aimT, tx = t ? t.wx : pl.wx + Math.cos(a) * w.range, ty = t ? t.wy : pl.wy + Math.sin(a) * w.range; this._spawnLob(pl.wx, pl.wy, tx, ty, w, "muck"); }
-      else if (w.fireType === "dot_field") { const t = this._aimT, tx = t ? t.wx : pl.wx + Math.cos(a) * w.range, ty = t ? t.wy : pl.wy + Math.sin(a) * w.range; this._spawnLob(pl.wx, pl.wy, tx, ty, w, "rot"); }
+      if (w.fireType === "projectile") {
+        this._popShot = (this._popShot + 1) % 5;
+        const n = 1 + ex;   // higher levels spit extra rounds in a tight fan
+        for (let i = 0; i < n; i++) { const ang = a + (n > 1 ? (i / (n - 1) - 0.5) * 0.2 : 0); this._spawnBullet(pl.wx, pl.wy, ang, w, { dmg: dmg, forceCrit: i === 0 && this._popShot === 0 }); }
+      }
+      else if (w.fireType === "spread") { const pel = w.pellets + ex; for (let i = 0; i < pel; i++) { const ang = a + (i / (pel - 1) - 0.5) * w.fan; this._spawnBullet(pl.wx, pl.wy, ang, w, { dmg: dmg, knock: w.knock }); } }
+      else if (w.fireType === "boomerang") { const n = 1 + Math.floor(ex / 2); for (let i = 0; i < n; i++) { const ang = a + (n > 1 ? (i - (n - 1) / 2) * 0.3 : 0); this._spawnBullet(pl.wx, pl.wy, ang, w, { dmg: dmg, boomerang: true, origin: { wx: pl.wx, wy: pl.wy }, phase: "out" }); } }
+      else if (w.fireType === "homing") { const cnt = w.count + ex; for (let i = 0; i < cnt; i++) { const ang = a + (i - (cnt - 1) / 2) * 0.4; this._spawnBullet(pl.wx, pl.wy, ang, w, { dmg: dmg, homing: true, turn: w.turn }); } }
+      else if (w.fireType === "aoe_lob") { const t = this._aimT, tx = t ? t.wx : pl.wx + Math.cos(a) * w.range, ty = t ? t.wy : pl.wy + Math.sin(a) * w.range; this._spawnLob(pl.wx, pl.wy, tx, ty, w, "muck", dmg); }
+      else if (w.fireType === "dot_field") { const t = this._aimT, tx = t ? t.wx : pl.wx + Math.cos(a) * w.range, ty = t ? t.wy : pl.wy + Math.sin(a) * w.range; this._spawnLob(pl.wx, pl.wy, tx, ty, w, "rot", dmg); }
       else if (w.fireType === "chain") this._chain(w);
       else if (w.fireType === "piercing") this._rail(w);
       else if (w.fireType === "melee_arc") this._scythe(w);
+      else if (w.fireType === "orbital") this._orbital(w);
+    }
+
+    // ORBITAL STRIKE — the Missile Command nod: paints a target area near the densest threat and
+    // rains a cluster of delayed explosions down from the sky. Levels add more impacts + reach.
+    _orbital(w) {
+      const pl = this.player, dmg = this._wdmg(w), n = w.strikes + this._wextra(w);
+      // aim at the nearest enemy (or where you point in manual); spread impacts around it
+      let cx, cy; const t = this._aimT;
+      if (t) { cx = t.wx; cy = t.wy; } else { cx = pl.wx + Math.cos(pl.aim) * w.range * 0.6; cy = pl.wy + Math.sin(pl.aim) * w.range * 0.6; }
+      for (let i = 0; i < n; i++) {
+        const ang = rand(0, TAU), r = i === 0 ? 0 : rand(20, 70);
+        this.strikes.push({ wx: cx + Math.cos(ang) * r, wy: cy + Math.sin(ang) * r, delay: 0.18 + i * 0.12, blast: w.blast, dmg: dmg, color: w.color });
+      }
+      this._shake(2);
+    }
+    _updateStrikes(s) {
+      for (let i = this.strikes.length - 1; i >= 0; i--) {
+        const st = this.strikes[i]; st.delay -= s;
+        if (st.delay <= 0) { this._blast(st.wx, st.wy, st.blast, st.dmg, st.color); this.audio.play("boom"); this.strikes.splice(i, 1); }
+      }
     }
 
     _spawnBullet(wx, wy, ang, w, extra) {
@@ -475,9 +558,9 @@
       const b = Object.assign({ wx: wx, wy: wy, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, dmg: w.dmg, wid: w.id, color: w.color, draw: w.draw, life: life, r: 8, pierce: 0, hit: {}, z: 0 }, extra || {});
       this.bullets.push(b);
     }
-    _spawnLob(wx, wy, tx, ty, w, kind) {
+    _spawnLob(wx, wy, tx, ty, w, kind, dmg) {
       const d = dist(wx, wy, tx, ty), spd = Math.max(140, w.projSpeed) * MOVE, life = d / spd;
-      this.bullets.push({ wx: wx, wy: wy, vx: (tx - wx) / Math.max(0.001, life), vy: (ty - wy) / Math.max(0.001, life), dmg: w.dmg, wid: w.id, color: w.color, draw: "blob", life: life, r: 8, lob: true, kind: kind, w: w, z: 0, zPeak: 40 + d * 0.06 });
+      this.bullets.push({ wx: wx, wy: wy, vx: (tx - wx) / Math.max(0.001, life), vy: (ty - wy) / Math.max(0.001, life), dmg: dmg != null ? dmg : w.dmg, wid: w.id, color: w.color, draw: "blob", life: life, r: 8, lob: true, kind: kind, w: w, z: 0, zPeak: 40 + d * 0.06 });
     }
 
     _orbitDamage(s, w) {
@@ -485,17 +568,19 @@
       for (const id in cd) { cd[id] -= s; if (cd[id] <= 0) delete cd[id]; }
       for (let k = 0; k < this.orbit.count; k++) {
         const a = this.orbit.ang + k * TAU / this.orbit.count, bx = pl.wx + Math.cos(a) * this.orbit.r, by = pl.wy + Math.sin(a) * this.orbit.r;
-        for (const e of this.enemies.slice()) { if (cd[e.id]) continue; if (dist(e.wx, e.wy, bx, by) < e.radius + 14) { this._damage(e, w.dmg, bx, by, false, 50); cd[e.id] = 0.35; } }
+        for (const e of this.enemies.slice()) { if (cd[e.id]) continue; if (dist(e.wx, e.wy, bx, by) < e.radius + 14) { this._damage(e, this._wdmg(w), bx, by, false, 50); cd[e.id] = 0.35; } }
       }
     }
     _beamDamage(s, w) {
       const pl = this.player;
-      for (const e of this.enemies.slice()) { const d = dist(e.wx, e.wy, pl.wx, pl.wy); if (d > w.range + e.radius) continue; const ang = Math.atan2(e.wy - pl.wy, e.wx - pl.wx); if (Math.abs(angNorm(ang - pl.aim)) < w.half) { this._damage(e, w.dmg * s * 12, e.wx, e.wy, false, 0); e.burn = 1.2; if (this.theme.effects.particles && Math.random() < 0.4) this._spark(e.wx, e.wy, "#ff7a2a", 1); } }
+      const bdmg = this._wdmg(w);
+      for (const e of this.enemies.slice()) { const d = dist(e.wx, e.wy, pl.wx, pl.wy); if (d > w.range + e.radius) continue; const ang = Math.atan2(e.wy - pl.wy, e.wx - pl.wx); if (Math.abs(angNorm(ang - pl.aim)) < w.half) { this._damage(e, bdmg * s * 12, e.wx, e.wy, false, 0); e.burn = 1.2; if (this.theme.effects.particles && Math.random() < 0.4) this._spark(e.wx, e.wy, "#ff7a2a", 1); } }
       if (this.theme.effects.particles && Math.random() < 0.6) { const r = rand(40, w.range), a = pl.aim + rand(-w.half, w.half); this._spark(pl.wx + Math.cos(a) * r, pl.wy + Math.sin(a) * r, pick(["#ffe14d", "#ff8c2a", "#ff3a1a"]), 2); }
     }
     _chain(w) {
-      const pl = this.player; let cx = pl.wx, cy = pl.wy; const used = {}, pts = [{ wx: pl.wx, wy: pl.wy }]; let dmg = w.dmg;
-      for (let k = 0; k < w.chain; k++) {
+      const pl = this.player; let cx = pl.wx, cy = pl.wy; const used = {}, pts = [{ wx: pl.wx, wy: pl.wy }]; let dmg = this._wdmg(w);
+      const links = w.chain + this._wextra(w);
+      for (let k = 0; k < links; k++) {
         let best = null, bd = (k === 0 ? w.range : 220);
         for (const e of this.enemies) { if (used[e.id]) continue; const d = dist(e.wx, e.wy, cx, cy); if (d < bd) { bd = d; best = e; } }
         if (!best) break; used[best.id] = 1; pts.push({ wx: best.wx, wy: best.wy }); const slowed = best.slow > 0; this._damage(best, dmg * (slowed ? 1.5 : 1), best.wx, best.wy, false, 0); cx = best.wx; cy = best.wy; dmg *= (1 - w.decay);
@@ -503,14 +588,14 @@
       if (pts.length > 1) { this.zaps.push({ pts: pts, life: 0.22, maxLife: 0.22, color: w.color }); this.audio.play("zap"); if (pts.length > 4) this._shake(3); }
     }
     _rail(w) {
-      const pl = this.player, a = pl.aim, ex = pl.wx + Math.cos(a) * w.range, ey = pl.wy + Math.sin(a) * w.range;
-      for (const e of this.enemies.slice()) { const proj = ((e.wx - pl.wx) * Math.cos(a) + (e.wy - pl.wy) * Math.sin(a)); if (proj < 0 || proj > w.range) continue; const perp = Math.abs(-(e.wx - pl.wx) * Math.sin(a) + (e.wy - pl.wy) * Math.cos(a)); if (perp < e.radius + 16) this._damage(e, w.dmg, e.wx, e.wy, false, 30); }
+      const pl = this.player, a = pl.aim, ex = pl.wx + Math.cos(a) * w.range, ey = pl.wy + Math.sin(a) * w.range, rdmg = this._wdmg(w);
+      for (const e of this.enemies.slice()) { const proj = ((e.wx - pl.wx) * Math.cos(a) + (e.wy - pl.wy) * Math.sin(a)); if (proj < 0 || proj > w.range) continue; const perp = Math.abs(-(e.wx - pl.wx) * Math.sin(a) + (e.wy - pl.wy) * Math.cos(a)); if (perp < e.radius + 16) this._damage(e, rdmg, e.wx, e.wy, false, 30); }
       this.rails.push({ wx: pl.wx, wy: pl.wy, x2: ex, y2: ey, life: 0.25, maxLife: 0.25, color: w.color });
       pl.wx -= Math.cos(a) * 14; pl.wy -= Math.sin(a) * 14; this.audio.play("rail"); this._shake(5);
     }
     _scythe(w) {
-      const pl = this.player; let healed = 0;
-      for (const e of this.enemies.slice()) { const d = dist(e.wx, e.wy, pl.wx, pl.wy); if (d > w.range + e.radius) continue; const ang = Math.atan2(e.wy - pl.wy, e.wx - pl.wx); if (Math.abs(angNorm(ang - pl.aim)) < w.half) { this._damage(e, w.dmg, e.wx, e.wy, false, w.knock); if (w.lifesteal) { this.player.hp = Math.min(this._maxHp(), this.player.hp + 1); healed++; } } }
+      const pl = this.player; let healed = 0; const sdmg = this._wdmg(w);
+      for (const e of this.enemies.slice()) { const d = dist(e.wx, e.wy, pl.wx, pl.wy); if (d > w.range + e.radius) continue; const ang = Math.atan2(e.wy - pl.wy, e.wx - pl.wx); if (Math.abs(angNorm(ang - pl.aim)) < w.half) { this._damage(e, sdmg, e.wx, e.wy, false, w.knock); if (w.lifesteal) { this.player.hp = Math.min(this._maxHp(), this.player.hp + 1); healed++; } } }
       this.sweeps.push({ wx: pl.wx, wy: pl.wy, ang: pl.aim, half: w.half, r: w.range, life: 0.22, maxLife: 0.22, color: w.color }); this.audio.play("whoosh"); this._shake(2);
     }
 
@@ -547,9 +632,9 @@
       }
     }
     _lobLand(b) {
-      const w = b.w; this._blast(b.wx, b.wy, w.blast || 80, w.dmg, w.color);
+      const w = b.w; this._blast(b.wx, b.wy, w.blast || 80, b.dmg, w.color);
       if (b.kind === "muck") this.fields.push({ wx: b.wx, wy: b.wy, r: (w.blast || 80) * 0.9, life: 1.5, maxLife: 1.5, dmg: 0, tick: 0, color: "#5bf0a0", kind: "muck", slow: 0.5, owner: "player" });
-      else if (b.kind === "rot") this.fields.push({ wx: b.wx, wy: b.wy, r: 100, life: w.cloud, maxLife: w.cloud, dmg: w.dmg, tick: 0, ramp: 0, color: "#9d4edd", kind: "rot", slow: 0.85, owner: "player" });
+      else if (b.kind === "rot") this.fields.push({ wx: b.wx, wy: b.wy, r: 100, life: w.cloud, maxLife: w.cloud, dmg: b.dmg, tick: 0, ramp: 0, color: "#9d4edd", kind: "rot", slow: 0.85, owner: "player" });
       this.audio.play("boom");
     }
     _blast(wx, wy, r, dmg, color) {
@@ -573,7 +658,7 @@
         if (e.kvx || e.kvy) { e.wx += e.kvx * s; e.wy += e.kvy * s; e.kvx *= (1 - 6 * s); e.kvy *= (1 - 6 * s); if (Math.abs(e.kvx) < 2 && Math.abs(e.kvy) < 2) { e.kvx = 0; e.kvy = 0; } }
         const slowF = (e.slow > 0 ? 0.5 : 1) * (this.boosts.frostSlow > 0 ? 0.4 : 1);
         const buffF = e.buffT > 0 ? 1.3 : 1;
-        const diff = 1 + Math.max(0, this.wave - 10) * 0.02;   // enemies get faster late so the horde stays threatening
+        const diff = (1 + Math.max(0, this.wave - 10) * 0.02) * (this.waveMod ? this.waveMod.spd : 1) * (e.elite ? 0.9 : 1);   // late-game + modifier speed; elites are slower brutes
         const spd = def.speed * MOVE * slowF * buffF * diff;
         const toA = Math.atan2(pl.wy - e.wy, pl.wx - e.wx), dToP = dist(e.wx, e.wy, pl.wx, pl.wy);
         e.flip = Math.cos(toA) >= 0 ? 1 : -1;
@@ -672,12 +757,18 @@
     }
     _collect(p) {
       if (p.kind === "xp") { this._gainXp(p.value); this.audio.play("pickup"); if (this.theme.effects.particles) this._spark(this.player.wx, this.player.wy, this.theme.palette.accent, 3); }
-      else if (p.kind === "weapon") { if (this.weapons.indexOf(p.wid) < 0) { this.weapons.push(p.wid); this.weapon = p.wid; this._toast("GOT " + WMAP[p.wid].name + "!", true, WMAP[p.wid].color); } else this._toast(WMAP[p.wid].name + " (owned)"); this.audio.play("buy"); }
+      else if (p.kind === "weapon") {
+        if (this.weapons.indexOf(p.wid) < 0) { this.weapons.push(p.wid); this.wlvl[p.wid] = 1; this.weapon = p.wid; this._toast("GOT " + WMAP[p.wid].name + "!", true, WMAP[p.wid].color); }
+        else if (this._lvlOf(p.wid) < MAXW) { this.wlvl[p.wid] = this._lvlOf(p.wid) + 1; this._toast(WMAP[p.wid].name + "  Lv" + this.wlvl[p.wid] + "!", true, WMAP[p.wid].color); }
+        else this._toast(WMAP[p.wid].name + " MAX"); this.audio.play("buy");
+      }
       else this._applyPowerup(p.pid);
     }
     _applyPowerup(pid) {
       const pl = this.player; this.audio.play("buy");
       if (pid === "med") { const heal = Math.max(35, this._maxHp() * 0.25); pl.hp = Math.min(this._maxHp(), pl.hp + heal); this._toast("MED-KIT  +" + Math.round(heal) + " HP", true, "#46f06a"); this._spark(pl.wx, pl.wy, "#46f06a", 8); }
+      else if (pid === "shield") { const m = this._maxShield(); if (m <= 0) { pl.hp = Math.min(this._maxHp(), pl.hp + 30); this._toast("AEGIS CELL — pick Plating to hold a shield!", true, "#5ad1ff"); } else { pl.shield = m; pl.shieldPause = 0; this._toast("AEGIS CELL — shield full!", true, "#5ad1ff"); } this.shocks.push({ wx: pl.wx, wy: pl.wy, r: 0, maxR: 120, life: 0.4, maxLife: 0.4, color: "#5ad1ff" }); this._spark(pl.wx, pl.wy, "#5ad1ff", 10); }
+      else if (pid === "berserk") { this.boosts.berserk = Math.max(this.boosts.berserk, 0) + 9; this._toast("BERSERK — ×2 DAMAGE + lifesteal!", true, "#ff4d6a"); this._spark(pl.wx, pl.wy, "#ff4d6a", 10); }
       else if (pid === "adrenal") { this.boosts.adrenal = Math.max(this.boosts.adrenal, 0) + 8; this._toast("ADRENALINE — faster fire & feet!", true, "#ff9a2a"); }
       else if (pid === "frost") { this.boosts.frostSlow = 4; this.audio.play("frost"); this._toast("FROST NOVA — horde frozen!", true, "#8fd9ff"); this.shocks.push({ wx: pl.wx, wy: pl.wy, r: 0, maxR: 400, life: 0.6, maxLife: 0.6, color: "#8fd9ff" }); for (const e of this.enemies) if (dist(e.wx, e.wy, pl.wx, pl.wy) < 240) e.slow = Math.max(e.slow, 2); }
       else if (pid === "overcharge") { pl.stam = this._maxStam(); this.boosts.overcharge = 6; this._toast("OVERCHARGE — free dashes!", true, "#7a6bff"); }
@@ -751,9 +842,16 @@
       // combo + score
       this.comboKills++; this.comboT = 2.5;
       this.combo = this.comboKills >= 10 ? 8 : this.comboKills >= 5 ? 4 : this.comboKills >= 2 ? 2 : 1;
-      this.score += e.def.score * this.combo;
-      // xp shard
+      this.score += e.def.score * this.combo * (e.elite ? 3 : 1);
+      // xp shard(s) — elites burst extra XP
       this.pickups.push({ kind: "xp", wx: e.wx, wy: e.wy, value: e.def.xp, t: 0, r: 8, life: 22 });
+      if (e.elite) {
+        for (let k = 0; k < 3; k++) { const a = rand(0, TAU), r = rand(14, 40); this.pickups.push({ kind: "xp", wx: e.wx + Math.cos(a) * r, wy: e.wy + Math.sin(a) * r, value: e.def.xp, t: 0, r: 8, life: 22 }); }
+        this.pickups.push({ kind: "powerup", pid: this._rollPowerup(this._luck() + 0.5), wx: e.wx, wy: e.wy, t: 0, r: 11 });   // guaranteed loot
+        const unowned = WEAPONS.filter(w => this.weapons.indexOf(w.id) < 0);
+        if (unowned.length && Math.random() < 0.3) this.pickups.push({ kind: "weapon", wid: pick(unowned).id, wx: e.wx + 16, wy: e.wy, t: 0, r: 12 });
+        this._blast(e.wx, e.wy, 60, 0, e.def.color); this._toast("ELITE DOWN!", false, "#ffd23f");
+      }
       // drops
       this._rollDrops(e);
       this._deathFx(e); this.audio.play("zdeath");
@@ -787,6 +885,13 @@
     _hurt(amount, fx, fy, smooth) {
       const pl = this.player; if (pl.dashT > 0 || this.dev) return;
       if (!smooth && pl.hurtCd > 0) return;
+      // energy shield soaks damage first, then bleeds into HP
+      if (pl.shield > 0) {
+        const soak = Math.min(pl.shield, amount); pl.shield -= soak; amount -= soak;
+        pl.shieldPause = Math.max(pl.shieldPause, smooth ? 1.4 : 2.6); pl.shieldHit = 0.25;
+        if (!smooth && this.theme.effects.particles) this._spark(pl.wx, pl.wy, "#5ad1ff", 6);
+        if (amount <= 0) { if (!smooth) { pl.invuln = Math.max(pl.invuln, 160); this.audio.play("hurt"); } return; }
+      }
       pl.hp -= amount;
       if (!smooth) { pl.hurtCd = 350; pl.invuln = Math.max(pl.invuln, 200); const a = Math.atan2(pl.wy - fy, pl.wx - fx); pl.wx += Math.cos(a) * 16; pl.wy += Math.sin(a) * 16; this.audio.play("hurt"); this._shake(5); }
       else if (Math.random() < 0.05) this.audio.play("hurt");
@@ -799,23 +904,25 @@
     }
     _levelUp() {
       this.audio.play("levelup");
-      // build candidate cards
-      const cards = [];
-      const attrCands = ATTRS.filter(a => this.attr[a.id] < a.max);
-      const shuffled = attrCands.slice().sort(() => Math.random() - 0.5);
-      for (const a of shuffled) cards.push({ kind: "attr", id: a.id, title: a.name, tag: "LVL " + this.attr[a.id] + "→" + (this.attr[a.id] + 1), desc: a.short, icon: a.icon, color: this.theme.palette.accent });
+      // candidate pool: attribute boosts + WEAPON LEVEL-UPS (so collecting/leveling is the core choice)
+      const cands = [];
+      ATTRS.filter(a => this.attr[a.id] < a.max).forEach(a => cands.push({ kind: "attr", id: a.id, title: a.name, tag: "LVL " + this.attr[a.id] + "→" + (this.attr[a.id] + 1), desc: a.short, icon: a.icon, color: this.theme.palette.accent }));
+      this.weapons.filter(id => this._lvlOf(id) < MAXW).forEach(id => { const w = WMAP[id]; cands.push({ kind: "wlvl", id: id, title: w.name, tag: "Lv " + this._lvlOf(id) + "→" + (this._lvlOf(id) + 1), desc: "+34% damage · faster fire" + (this._wextra(w) !== this._wextraAt(id, this._lvlOf(id) + 1) ? " · +projectile" : ""), icon: "⬆", color: w.color || this.theme.palette.accent }); });
+      const cards = cands.sort(() => Math.random() - 0.5);
       const unowned = WEAPONS.filter(w => this.weapons.indexOf(w.id) < 0);
-      if (unowned.length && Math.random() < 0.5) { const w = pick(unowned); cards.unshift({ kind: "weapon", id: w.id, title: w.name, tag: "NEW WEAPON", desc: "Tier " + w.tier + " " + w.fireType.replace("_", " "), icon: "🔫", color: w.color }); }
+      if (unowned.length && Math.random() < 0.55) { const w = pick(unowned); cards.unshift({ kind: "weapon", id: w.id, title: w.name, tag: "NEW WEAPON", desc: "Tier " + w.tier + " " + w.fireType.replace("_", " "), icon: "🔫", color: w.color }); }
       let pool = cards.slice(0, 3 + (this.attr.luck >= 5 && Math.random() < 0.4 ? 1 : 0));
       if (pool.length === 0) pool = [{ kind: "heal", title: "Field Medic", tag: "RESTORE", desc: "Heal to full + 300 score", icon: "✚", color: "#46f06a" }];
       this._cards = pool; this._cardSel = 0; this.state = "levelup";
       this._clearTouch(); this.audio.suspendMusic();
     }
+    _wextraAt(id, lvl) { return Math.floor((lvl - 1) / 2); }   // helper: would this level add a projectile?
     _chooseCard(i) {
       if (this.state !== "levelup" || !this._cards || i < 0 || i >= this._cards.length) return;
       const c = this._cards[i]; this.audio.play("buy");
-      if (c.kind === "attr") { this.attr[c.id]++; if (c.id === "max_health") this.player.hp = Math.min(this._maxHp(), this.player.hp + 20); this._toast(c.title + " " + this.attr[c.id], false, this.theme.palette.accent); }
-      else if (c.kind === "weapon") { this.weapons.push(c.id); this.weapon = c.id; this._toast("GOT " + WMAP[c.id].name + "!", true, c.color); }
+      if (c.kind === "attr") { this.attr[c.id]++; if (c.id === "max_health") this.player.hp = Math.min(this._maxHp(), this.player.hp + 20); if (c.id === "armor") this.player.shield = this._maxShield(); this._toast(c.title + " " + this.attr[c.id], false, this.theme.palette.accent); }
+      else if (c.kind === "weapon") { this.weapons.push(c.id); this.wlvl[c.id] = 1; this.weapon = c.id; this._toast("GOT " + WMAP[c.id].name + "!", true, c.color); }
+      else if (c.kind === "wlvl") { this.wlvl[c.id] = Math.min(MAXW, this._lvlOf(c.id) + 1); this.weapon = c.id; this._toast(WMAP[c.id].name + "  Lv" + this.wlvl[c.id], true, c.color); }
       else if (c.kind === "heal") { this.player.hp = this._maxHp(); this.score += 300; }
       this._cards = null; this._pendingLevels = Math.max(0, (this._pendingLevels || 1) - 1);
       if (this._pendingLevels > 0) this._levelUp();   // queue: present the next level's card
@@ -854,6 +961,7 @@
       // ground hazards + telegraphs
       for (const f of this.fields) R.drawField(ctx, th, f, now);
       this._drawTelegraphs(ctx, R, th, now);
+      for (const st of this.strikes) R.drawStrike(ctx, th, st, now);   // Orbital Strike: incoming-impact markers
       // shadows (ground pass)
       for (const e of this.enemies) if (e.def.role !== "support") R.drawShadow(ctx, e.wx, e.wy, e.radius * 0.9);
       for (const t of this.turrets) R.drawShadow(ctx, t.wx, t.wy, 12);
@@ -885,8 +993,8 @@
       R.drawDamageNumbers(ctx, th, this.dmgNums);
       // HUD
       R.drawVignette(ctx, th);
-      R.drawHUD(ctx, th, { score: this.score, wave: this.wave, level: this.level, combo: this.combo, xpF: this.xp / this.xpNeed });
-      R.drawWeaponTag(ctx, th, WMAP[this.weapon], this.weapons.length + (this.dev ? " DEV" : ""));
+      R.drawHUD(ctx, th, { score: this.score, wave: this.wave, level: this.level, combo: this.combo, xpF: this.xp / this.xpNeed, mod: this.waveMod, pl: pl });
+      R.drawWeaponTag(ctx, th, WMAP[this.weapon], this.weapons.length + (this.dev ? " DEV" : ""), this._lvlOf(this.weapon));
       R.drawAimToggle(ctx, th, this.aimMode);
       if (this.boss) R.drawBossBar(ctx, th, this.boss);
       R.drawToasts(ctx, th, this.toasts, now);
