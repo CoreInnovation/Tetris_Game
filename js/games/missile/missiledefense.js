@@ -18,7 +18,7 @@
   const ARMY_RANGE = 300;   // soldiers at a battery only open up when a threat is actually within reach (not always blasting)
   const SUPPORT_MIN_WAVE = 8;   // support drops (×2/×3 multi-fire AND militia/base upgrades) only start once you're deeper in — early game is all about earning your weapons
   const HORNET_SPEED = 430, HORNET_TURN = 6.5, BH_PULL = 340, ZIG_AMP = 48;   // hornets nerfed: slower + lazier tracking
-  const DOCK_H = 120, POWERUP_LIFE = 16000, POWERUP_SLOTS = 3;   // two-row dock + how long a pickup LINGERS (longer so you actually see/grab it)
+  const DOCK_H = 240, POWERUP_LIFE = 16000, POWERUP_SLOTS = 3, NEW_WEAPON_BANNER_MS = 6000;   // taller two-row dock + how long a pickup LINGERS + how long the NEW WEAPON banner stays up
   // Screen-shake is tuned GENTLE: every _shake() request is scaled down and hard-capped, and it
   // decays fast, so even a wall of explosions reads as a firm rumble, not a chaotic earthquake.
   const SHAKE_SCALE = 0.42, SHAKE_CAP = 5.5, SHAKE_DECAY = 0.06;
@@ -101,21 +101,21 @@
   const TUMAP = {}; TOWN_UPGRADES.forEach(u => TUMAP[u.id] = u);
   M.TOWN_UPGRADES = TOWN_UPGRADES;
 
-  // ---- ENEMY KINDS: distinct falling threats. Exactly ONE new type is introduced per wave, ordered
-  // gentle -> nasty, so the roster grows one legible step at a time instead of piling on all at once.
+  // ---- ENEMY KINDS: distinct falling threats. A new type is introduced every 3 waves, ordered
+  // gentle -> nasty, so the roster grows one slow legible step at a time instead of piling on all at once.
   // _rollKind gates the spawn pool by introWave; _nextWave heralds whichever single type unlocks.
   const ENEMY_KINDS = [
     { id: "basic",     name: "MISSILE",      introWave: 1,  weight: 10, pattern: "straight",      speedMul: 1.0,  amp: 0,   freq: 0,  size: 2.6, color: null },
-    { id: "drifter",   name: "DRIFTER MINE", introWave: 2,  weight: 8,  pattern: "drift",         speedMul: 0.65, amp: 0,   freq: 0,  size: 5,   color: "#5bd1c9" },
-    { id: "dart",      name: "PLASMA DART",  introWave: 3,  weight: 9,  pattern: "straight_fast", speedMul: 1.85, amp: 0,   freq: 0,  size: 3,   color: "#ff4d4d" },
-    { id: "viper",     name: "VIPER",        introWave: 4,  weight: 7,  pattern: "zigzag_sharp",  speedMul: 1.1,  amp: 75,  freq: 9,  size: 4,   color: "#ffd23f" },
-    { id: "screamer",  name: "SCREAMER",     introWave: 5,  weight: 6,  pattern: "accelerate",    speedMul: 0.55, amp: 0,   freq: 0,  size: 4,   color: "#ff8c1a" },
-    { id: "corkscrew", name: "CORKSCREW",    introWave: 6,  weight: 6,  pattern: "corkscrew",     speedMul: 1.0,  amp: 42,  freq: 7,  size: 4,   color: "#b06bff" },
-    { id: "swarm",     name: "WASP SWARM",   introWave: 7,  weight: 5,  pattern: "cluster_swarm", speedMul: 1.2,  amp: 18,  freq: 14, size: 2.5, color: "#9dff3c" },
-    { id: "behemoth",  name: "BEHEMOTH",     introWave: 8,  weight: 3,  pattern: "heavy_bomber",  speedMul: 0.45, amp: 0,   freq: 0,  size: 9,   color: "#ff3838" },
-    { id: "hydra",     name: "HYDRA",        introWave: 9,  weight: 4,  pattern: "split_mirv",    speedMul: 0.95, amp: 0,   freq: 0,  size: 6,   color: "#ff5fa2" },
-    { id: "mimic",     name: "MIMIC",        introWave: 10, weight: 4,  pattern: "decoy",         speedMul: 1.0,  amp: 0,   freq: 0,  size: 4,   color: "#c0c4cc" },
-    { id: "serpent",   name: "SKY SERPENT",  introWave: 11, weight: 3,  pattern: "squiggle",      speedMul: 0.8,  amp: 175, freq: 4,  size: 6,   color: "#3fe0ff" }
+    { id: "drifter",   name: "DRIFTER MINE", introWave: 4,  weight: 8,  pattern: "drift",         speedMul: 0.65, amp: 0,   freq: 0,  size: 5,   color: "#5bd1c9" },
+    { id: "dart",      name: "PLASMA DART",  introWave: 7,  weight: 9,  pattern: "straight_fast", speedMul: 1.85, amp: 0,   freq: 0,  size: 3,   color: "#ff4d4d" },
+    { id: "viper",     name: "VIPER",        introWave: 10, weight: 7,  pattern: "zigzag_sharp",  speedMul: 1.1,  amp: 75,  freq: 9,  size: 4,   color: "#ffd23f" },
+    { id: "screamer",  name: "SCREAMER",     introWave: 13, weight: 6,  pattern: "accelerate",    speedMul: 0.55, amp: 0,   freq: 0,  size: 4,   color: "#ff8c1a" },
+    { id: "corkscrew", name: "CORKSCREW",    introWave: 16, weight: 6,  pattern: "corkscrew",     speedMul: 1.0,  amp: 42,  freq: 7,  size: 4,   color: "#b06bff" },
+    { id: "swarm",     name: "WASP SWARM",   introWave: 19, weight: 5,  pattern: "cluster_swarm", speedMul: 1.2,  amp: 18,  freq: 14, size: 2.5, color: "#9dff3c" },
+    { id: "behemoth",  name: "BEHEMOTH",     introWave: 22, weight: 3,  pattern: "heavy_bomber",  speedMul: 0.45, amp: 0,   freq: 0,  size: 9,   color: "#ff3838" },
+    { id: "hydra",     name: "HYDRA",        introWave: 25, weight: 4,  pattern: "split_mirv",    speedMul: 0.95, amp: 0,   freq: 0,  size: 6,   color: "#ff5fa2" },
+    { id: "mimic",     name: "MIMIC",        introWave: 28, weight: 4,  pattern: "decoy",         speedMul: 1.0,  amp: 0,   freq: 0,  size: 4,   color: "#c0c4cc" },
+    { id: "serpent",   name: "SKY SERPENT",  introWave: 31, weight: 3,  pattern: "squiggle",      speedMul: 0.8,  amp: 175, freq: 4,  size: 6,   color: "#3fe0ff" }
   ];
   const KMAP = {}; ENEMY_KINDS.forEach(k => KMAP[k.id] = k);
   M.ENEMY_KINDS = ENEMY_KINDS;
@@ -377,7 +377,8 @@
       this.uiScale = this.shell.isTouch
         ? Math.max(0.52, Math.min(0.95, w / 640))
         : Math.max(1, Math.min(1.7, Math.min(w / 1100, h / 640)));
-      this.dockH = Math.round(DOCK_H * this.uiScale);
+      // taller weapons dock (~2x), sized by screen RATIO with clamps so it never eats the screen or vanishes
+      this.dockH = Math.round(Math.max(130, Math.min(DOCK_H * this.uiScale, h * 0.32)));
       this.dockTop = h - this.dockH;
       this.groundY = this.dockTop - 12;   // thin ground strip sits just above the control dock
       const slotW = (w - 56) / 9, sx = i => 28 + slotW * (i + 0.5);
@@ -393,27 +394,33 @@
     // Lays out clickable rects for weapons/pickups/streaks; militia tiles are display-only.
     _layoutDock() {
       const s = this.uiScale || 1;
-      const w = this._w || 800, pad = Math.round(10 * s), gap = Math.round(6 * s), labelH = Math.round(12 * s);
-      // tiles auto-shrink to guarantee the row-2 blocks (militia + killstreaks) fit the width — never cram/overflow
+      const w = this._w || 800, pad = Math.round(10 * s), gap = Math.round(6 * s), labelH = Math.round(13 * s);
+      const rowGap = Math.round(7 * s), bottomPad = Math.round(9 * s);
+      // ROW-2 tiles (militia + killstreaks) shrink in WIDTH so all 13 fit across — never cram/overflow.
       const totalTiles = TOWN_MAX + STREAK_MAX, minCenterGap = Math.round(16 * s);
       const availRow2 = w - pad * 2 - minCenterGap - (totalTiles - 1) * gap;
-      const tileH = Math.max(Math.round(22 * s), Math.min(Math.round(38 * s), Math.floor(availRow2 / totalTiles)));
-      const row1Y = this.dockTop + labelH + Math.round(4 * s);
-      const row2Y = row1Y + tileH + labelH + Math.round(4 * s);
-      // right column width is governed by the widest right block (killstreaks)
-      const sTile = tileH, streakBlockW = STREAK_MAX * sTile + (STREAK_MAX - 1) * gap;
-      const rightLeft = w - pad - streakBlockW;
+      const tileW = Math.max(Math.round(20 * s), Math.floor(availRow2 / totalTiles));   // row-2 tile WIDTH (width-driven)
+      // tile HEIGHT grows with the (now taller) dock — driven by its vertical budget, clamped by screen ratio AND by
+      // the tile width (so big icons never overflow a narrow tile). Two tile rows + two section labels share the budget.
+      const vBudget = this.dockH - (2 * labelH + Math.round(4 * s) + rowGap + bottomPad);
+      let tileH = Math.floor(vBudget / 2);
+      tileH = Math.max(Math.round(28 * s), Math.min(tileH, Math.round(92 * s)));   // ratio clamp: never too small / too big
+      tileH = Math.min(tileH, Math.round(tileW * 1.9));                            // don't go tall-skinny (icons are sized off height)
+      // bottom-anchor both rows; any slack becomes breathing room under the ground line (spacious, not cramped)
+      const row2Y = this.dockTop + this.dockH - bottomPad - tileH;
+      const row1Y = row2Y - labelH - rowGap - tileH;
+      // KILLSTREAKS block (row 2, right)
+      const streakBlockW = STREAK_MAX * tileW + (STREAK_MAX - 1) * gap, rightLeft = w - pad - streakBlockW;
       this.streakSlots = [];
-      for (let i = 0; i < STREAK_MAX; i++) this.streakSlots.push({ x: rightLeft + i * (sTile + gap), y: row2Y, w: sTile, h: tileH });
+      for (let i = 0; i < STREAK_MAX; i++) this.streakSlots.push({ x: rightLeft + i * (tileW + gap), y: row2Y, w: tileW, h: tileH });
       this.pickupSlots = [];   // pickups fall from the sky now (no dock INCOMING slots)
-      // MILITIA — townsfolk upgrade slots on row 2 left
-      const mTile = tileH, milBlockW = TOWN_MAX * mTile + (TOWN_MAX - 1) * gap;
+      // MILITIA block (row 2, left)
       this.militiaSlots = [];
-      for (let i = 0; i < TOWN_MAX; i++) this.militiaSlots.push({ x: pad + i * (mTile + gap), y: row2Y, w: mTile, h: tileH });
-      // ARSENAL — your held weapons fill row 1 (dev shows all); spans the full width now that INCOMING is gone
+      for (let i = 0; i < TOWN_MAX; i++) this.militiaSlots.push({ x: pad + i * (tileW + gap), y: row2Y, w: tileW, h: tileH });
+      // ARSENAL — held weapons fill row 1 (dev shows all); same tall height as row-2 tiles so the weapon boxes grow too
       const ids = this.dev ? WEAPONS.map(wp => wp.id) : (this.collected ? this.collected.slice() : ["interceptor"]);
       const n = Math.max(1, ids.length), wLeft = pad, wRight = w - pad, avail = Math.max(120 * s, wRight - wLeft);
-      const cw = Math.max(Math.round(34 * s), Math.min(Math.round(96 * s), Math.floor((avail - (n - 1) * gap) / n)));
+      const cw = Math.max(Math.round(40 * s), Math.min(Math.round(120 * s), Math.floor((avail - (n - 1) * gap) / n)));
       this.weaponChips = ids.map((id, i) => ({ id: id, x: wLeft + i * (cw + gap), y: row1Y, w: cw, h: tileH }));
     }
     _layoutChips() { this._layoutDock(); }   // legacy alias (dev toggle / collect calls)
@@ -567,7 +574,7 @@
       }
       const w = WMAP[pu.weapon], wasNew = !this.collected.includes(pu.weapon);
       this._collectWeapon(pu.weapon, auto);   // adds to the 4-slot inventory; manual grab also equips it (auto-grab keeps your current weapon)
-      if (wasNew) { this.hintArsenal = 5000; this.newWeapon = pu.weapon; this.newWeaponT = 3000; }   // flag the arsenal + pop the big center "NEW WEAPON" banner (3s window to select)
+      if (wasNew) { this.hintArsenal = 5000; this.newWeapon = pu.weapon; this.newWeaponT = NEW_WEAPON_BANNER_MS; }   // flag the arsenal + pop the big center "NEW WEAPON" banner (stays up NEW_WEAPON_BANNER_MS to select)
       this.heat[pu.weapon] = 0; this.cdT[pu.weapon] = 0; this.reload[pu.weapon] = 0;
       this.audio.play("extralife");
       this._toast((wasNew ? "GOT — " : "RESTOCKED — ") + w.name + "!", true, w.color);
@@ -968,7 +975,7 @@
       if (this.pending > 0) { this.spawnT -= dt; if (this.spawnT <= 0) { this._spawnEnemy(); this.pending--; this.spawnT = this.spawnGap * rand(0.6, 1.4); } }
       this.powerupT -= dt; if (this.powerupT <= 0 && !this.betweenWaves && this.powerups.length < POWERUP_SLOTS) { this._spawnPowerup(); this.powerupT = rand(7000, 12000); }   // a supply pod drops every ~7-12s — a noticeable event you shoot to earn (not during the breather)
       if (!this.betweenWaves && this.multishotT > 0) { this.multishotT -= dt; if (this.multishotT <= 0) { this.multishot = 1; this.multishotT = 0; this._toast("MULTI-FIRE OFF"); } }   // don't burn powerup time during the wave breather
-      this.ufoT -= dt; if (this.ufoT <= 0 && this.wave >= 2 && this.ufos.length < 1) { this._spawnUfo(); this.ufoT = rand(14000, 24000); }
+      this.ufoT -= dt; if (this.ufoT <= 0 && this.wave >= 15 && this.ufos.length < 1) { this._spawnUfo(); this.ufoT = rand(14000, 24000); }   // UFO spaceships are a late-game threat (wave 15+)
 
       // enemies (each kind moves differently; the "spine" cx/cy tracks the target, x/y add the weave)
       for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -1334,11 +1341,11 @@
         meter: this.streaks.length < STREAK_MAX ? (this.streakKills / STREAK_EVERY) : 1,
         nextSlot: Math.min(this.streaks.length, STREAK_MAX - 1),
         hint: { arsenal: this.hintArsenal } });
-      // big center "NEW WEAPON" banner with a 3s window to select it (clickable — see _pd)
+      // big center "NEW WEAPON" banner with a 6s window to select it (clickable — see _pd)
       if (this.newWeaponT > 0 && this.newWeapon) {
         const nw = WMAP[this.newWeapon];
         this._bannerRect = R.drawNewWeaponBanner(ctx, th, { id: this.newWeapon, name: nw.name, color: nw.color || th.palette.accent,
-          frac: Math.max(0, this.newWeaponT / 3000), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon,
+          frac: Math.max(0, this.newWeaponT / NEW_WEAPON_BANNER_MS), keyNum: WEAPONS.indexOf(nw) + 1, active: this.weapon === this.newWeapon,
           scale: this.uiScale, now: now, pop: this._bannerPop });
       } else this._bannerRect = null;
       // flying banner shards (the box shattering apart)

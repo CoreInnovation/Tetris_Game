@@ -495,9 +495,9 @@
     // Center-top "NEW WEAPON" banner with a big, classy, PULSING "CLICK TO ARM" call-to-action.
     // Clicking it equips the weapon and pops/shatters (see _bannerBoom / _shatterBanner).
     drawNewWeaponBanner(ctx, theme, d) {
-      // ~25% smaller than before (box + every glyph) — it was overwhelming. The 0.78 factor shrinks the
-      // whole banner uniformly since all sizes below derive from s.
-      const p = theme.palette, w = this.w, col = d.color || p.accent, s = (d.scale || 1) * 0.78, now = d.now || 0;
+      // Banner sizes uniformly off s (box + every glyph derive from it). The 1.56 factor makes it ~2x bigger on
+      // screen than the previous (0.78) tuning; the bw clamp keeps it from overflowing on narrow phones.
+      const p = theme.palette, w = this.w, col = d.color || p.accent, s = (d.scale || 1) * 1.56, now = d.now || 0;
       const fs = (px) => Math.round(px * s);
       const bw = Math.min(Math.round(330 * s), w - 36), bh = Math.round(66 * s);
       const bx = (w - bw) / 2, by = Math.max(46, this.h * 0.10);
