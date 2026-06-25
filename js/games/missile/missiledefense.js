@@ -101,19 +101,21 @@
   const TUMAP = {}; TOWN_UPGRADES.forEach(u => TUMAP[u.id] = u);
   M.TOWN_UPGRADES = TOWN_UPGRADES;
 
-  // ---- ENEMY KINDS: distinct falling threats, introduced as waves climb ----
+  // ---- ENEMY KINDS: distinct falling threats. Exactly ONE new type is introduced per wave, ordered
+  // gentle -> nasty, so the roster grows one legible step at a time instead of piling on all at once.
+  // _rollKind gates the spawn pool by introWave; _nextWave heralds whichever single type unlocks.
   const ENEMY_KINDS = [
     { id: "basic",     name: "MISSILE",      introWave: 1,  weight: 10, pattern: "straight",      speedMul: 1.0,  amp: 0,   freq: 0,  size: 2.6, color: null },
-    { id: "dart",      name: "PLASMA DART",  introWave: 2,  weight: 9,  pattern: "straight_fast", speedMul: 1.85, amp: 0,   freq: 0,  size: 3,   color: "#ff4d4d" },
-    { id: "drifter",   name: "DRIFTER MINE", introWave: 3,  weight: 8,  pattern: "drift",         speedMul: 0.65, amp: 0,   freq: 0,  size: 5,   color: "#5bd1c9" },
+    { id: "drifter",   name: "DRIFTER MINE", introWave: 2,  weight: 8,  pattern: "drift",         speedMul: 0.65, amp: 0,   freq: 0,  size: 5,   color: "#5bd1c9" },
+    { id: "dart",      name: "PLASMA DART",  introWave: 3,  weight: 9,  pattern: "straight_fast", speedMul: 1.85, amp: 0,   freq: 0,  size: 3,   color: "#ff4d4d" },
     { id: "viper",     name: "VIPER",        introWave: 4,  weight: 7,  pattern: "zigzag_sharp",  speedMul: 1.1,  amp: 75,  freq: 9,  size: 4,   color: "#ffd23f" },
-    { id: "corkscrew", name: "CORKSCREW",    introWave: 5,  weight: 6,  pattern: "corkscrew",     speedMul: 1.0,  amp: 42,  freq: 7,  size: 4,   color: "#b06bff" },
-    { id: "screamer",  name: "SCREAMER",     introWave: 6,  weight: 6,  pattern: "accelerate",    speedMul: 0.55, amp: 0,   freq: 0,  size: 4,   color: "#ff8c1a" },
+    { id: "screamer",  name: "SCREAMER",     introWave: 5,  weight: 6,  pattern: "accelerate",    speedMul: 0.55, amp: 0,   freq: 0,  size: 4,   color: "#ff8c1a" },
+    { id: "corkscrew", name: "CORKSCREW",    introWave: 6,  weight: 6,  pattern: "corkscrew",     speedMul: 1.0,  amp: 42,  freq: 7,  size: 4,   color: "#b06bff" },
     { id: "swarm",     name: "WASP SWARM",   introWave: 7,  weight: 5,  pattern: "cluster_swarm", speedMul: 1.2,  amp: 18,  freq: 14, size: 2.5, color: "#9dff3c" },
     { id: "behemoth",  name: "BEHEMOTH",     introWave: 8,  weight: 3,  pattern: "heavy_bomber",  speedMul: 0.45, amp: 0,   freq: 0,  size: 9,   color: "#ff3838" },
-    { id: "hydra",     name: "HYDRA",        introWave: 10, weight: 4,  pattern: "split_mirv",    speedMul: 0.95, amp: 0,   freq: 0,  size: 6,   color: "#ff5fa2" },
-    { id: "mimic",     name: "MIMIC",        introWave: 12, weight: 4,  pattern: "decoy",         speedMul: 1.0,  amp: 0,   freq: 0,  size: 4,   color: "#c0c4cc" },
-    { id: "serpent",   name: "SKY SERPENT",  introWave: 14, weight: 3,  pattern: "squiggle",      speedMul: 0.8,  amp: 175, freq: 4,  size: 6,   color: "#3fe0ff" }
+    { id: "hydra",     name: "HYDRA",        introWave: 9,  weight: 4,  pattern: "split_mirv",    speedMul: 0.95, amp: 0,   freq: 0,  size: 6,   color: "#ff5fa2" },
+    { id: "mimic",     name: "MIMIC",        introWave: 10, weight: 4,  pattern: "decoy",         speedMul: 1.0,  amp: 0,   freq: 0,  size: 4,   color: "#c0c4cc" },
+    { id: "serpent",   name: "SKY SERPENT",  introWave: 11, weight: 3,  pattern: "squiggle",      speedMul: 0.8,  amp: 175, freq: 4,  size: 6,   color: "#3fe0ff" }
   ];
   const KMAP = {}; ENEMY_KINDS.forEach(k => KMAP[k.id] = k);
   M.ENEMY_KINDS = ENEMY_KINDS;
