@@ -521,6 +521,8 @@
       ctx.fillStyle = rgba(p.textDim, 0.95); ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui;
       ctx.fillText("NEW WEAPON", bx + fs(48), by + fs(14));
       ctx.fillStyle = col; ctx.font = "900 " + fs(15) + "px " + theme.fonts.ui;
+      const nmW = ctx.measureText(d.name).width, nameMax = bw - fs(48) - fs(52);   // keep clear of the KEY label; shrink long names so they never spill
+      if (nmW > nameMax && nmW > 0) ctx.font = "900 " + Math.max(8, Math.floor(fs(15) * nameMax / nmW)) + "px " + theme.fonts.ui;
       if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = col; }
       ctx.fillText(d.name, bx + fs(48), by + fs(29)); ctx.shadowBlur = 0;
       if (d.keyNum <= 9) { ctx.fillStyle = rgba(p.textDim, 0.8); ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.fillText("KEY [" + d.keyNum + "]", bx + bw - fs(12), by + fs(14)); }
@@ -536,8 +538,10 @@
         ctx.globalAlpha = a * flash;
         if (ctx.letterSpacing !== undefined) ctx.letterSpacing = fs(2) + "px";   // classy spacing where supported
         ctx.fillStyle = col; ctx.font = "900 " + fs(16) + "px " + theme.fonts.ui;
+        const cta = "▸  CLICK TO ARM  ◂", ctaMax = bw - fs(22), cwid = ctx.measureText(cta).width;   // shrink to stay inside the panel
+        if (cwid > ctaMax && cwid > 0) ctx.font = "900 " + Math.max(8, Math.floor(fs(16) * ctaMax / cwid)) + "px " + theme.fonts.ui;
         if (theme.effects.glow) { ctx.shadowBlur = 8 + 12 * pulse; ctx.shadowColor = col; }
-        ctx.fillText("▸  CLICK TO ARM  ◂", cx, ctaY); ctx.shadowBlur = 0;
+        ctx.fillText(cta, cx, ctaY); ctx.shadowBlur = 0;
         if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "0px";
         ctx.globalAlpha = a;
       }

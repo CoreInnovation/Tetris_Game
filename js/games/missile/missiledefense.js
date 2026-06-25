@@ -24,23 +24,23 @@
   const SHAKE_SCALE = 0.42, SHAKE_CAP = 5.5, SHAKE_DECAY = 0.06;
 
   // Primitive stats only — reload/heat/cool are DERIVED below from a balance model.
-  // minWave = the wave a weapon becomes ELIGIBLE to drop (powerful ones arrive later, so they're
-  // not OP in the opening waves). Ordered weakest -> strongest; dev mode ignores the gate.
+  // minWave = the wave a weapon becomes ELIGIBLE to drop. HARD-GATED in _spawnPowerup so only ONE new
+  // weapon unlocks every 3 waves (4, 7, 10, ...), ordered weakest -> strongest so the best gear comes late.
   const WEAPONS = [
     { id: "interceptor", name: "INTERCEPTOR", short: "INT", kind: "direct", speed: 640, blast: 60, base: true, minWave: 1, sfx: "launch", color: null },
-    { id: "artillery", name: "ARTILLERY", short: "ART", kind: "arc", speed: 1150, blast: 74, minWave: 2, sfx: "artillery", color: "#ff9a3a" },
-    { id: "railgun", name: "RAIL GUN", short: "RAIL", kind: "direct", speed: 2600, blast: 44, minWave: 3, sfx: "rail", color: "#7afcff" },
-    { id: "missile", name: "WARHEAD", short: "WAR", kind: "cold", speed: 320, blast: 170, minWave: 3, sfx: "eject", color: null },
-    { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 78, slow: 2.6, minWave: 4, sfx: "cryo", color: "#8fd9ff" },
-    { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 92, minWave: 4, sfx: "launch", color: "#ffe14d" },
+    { id: "artillery", name: "ARTILLERY", short: "ART", kind: "arc", speed: 1150, blast: 74, minWave: 4, sfx: "artillery", color: "#ff9a3a" },
+    { id: "railgun", name: "RAIL GUN", short: "RAIL", kind: "direct", speed: 2600, blast: 44, minWave: 7, sfx: "rail", color: "#7afcff" },
+    { id: "missile", name: "WARHEAD", short: "WAR", kind: "cold", speed: 320, blast: 170, minWave: 16, sfx: "eject", color: null },
+    { id: "cryo", name: "CRYO PULSE", short: "CRYO", kind: "direct", speed: 700, blast: 78, slow: 2.6, minWave: 13, sfx: "cryo", color: "#8fd9ff" },
+    { id: "flak", name: "FLAK", short: "FLAK", kind: "direct", speed: 760, blast: 34, pellets: 3, spread: 92, minWave: 10, sfx: "launch", color: "#ffe14d" },
     // homing interceptors that COLD-LAUNCH like the warhead (eject -> ignite -> home); quarter-size blast
-    { id: "seeker", name: "SEEKER", short: "SEEK", kind: "cold", homing: true, speed: 320, blast: 15, pellets: 1, reload: 460, mag: 5, cd: 1100, manual: true, minWave: 5, sfx: "eject", color: "#9affd0" },
+    { id: "seeker", name: "SEEKER", short: "SEEK", kind: "cold", homing: true, speed: 320, blast: 15, pellets: 1, reload: 460, mag: 5, cd: 1100, manual: true, minWave: 22, sfx: "eject", color: "#9affd0" },
     // NAPALM — arcs in, splashes a lingering FIRE FIELD that incinerates anything passing through for a few seconds
-    { id: "napalm", name: "NAPALM", short: "NAPM", kind: "arc", speed: 820, blast: 46, fire: true, fireR: 86, fireDur: 3.4, manual: true, reload: 520, mag: 4, cd: 1900, minWave: 6, sfx: "boom", color: "#ff6a2a" },
-    { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 36, cluster: 8, minWave: 6, sfx: "launch", color: "#ff7a3a" },
-    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 430, blast: 24, pellets: 3, pelletsMin: 2, pelletsMax: 3, fuse: 2.6, manual: true, reload: 1450, mag: 4, cd: 2500, minWave: 7, sfx: "launch", color: "#9aff6a" },   // small homing strike (2-3); support, not a clear-all
-    { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 2, manual: true, reload: 650, mag: 4, cd: 2300, minWave: 8, sfx: "rail", color: "#b388ff" },   // chains to 2; deliberate fire so it can't faceroll
-    { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 150, blackhole: true, manual: true, reload: 600, mag: 4, cd: 1700, minWave: 10, sfx: "cryo", color: "#c86bff" }   // late-game powerhouse: throw black holes fast; huge pull + core-devour + implosion (see _spawnBlackhole)
+    { id: "napalm", name: "NAPALM", short: "NAPM", kind: "arc", speed: 820, blast: 46, fire: true, fireR: 86, fireDur: 3.4, manual: true, reload: 520, mag: 4, cd: 1900, minWave: 25, sfx: "boom", color: "#ff6a2a" },
+    { id: "cluster", name: "HAILSTORM", short: "HAIL", kind: "direct", speed: 920, blast: 36, cluster: 8, minWave: 19, sfx: "launch", color: "#ff7a3a" },
+    { id: "hornets", name: "HORNETS", short: "HORN", kind: "swarm", speed: 430, blast: 24, pellets: 3, pelletsMin: 2, pelletsMax: 3, fuse: 2.6, manual: true, reload: 1450, mag: 4, cd: 2500, minWave: 28, sfx: "launch", color: "#9aff6a" },   // small homing strike (2-3); support, not a clear-all
+    { id: "tesla", name: "TESLA COIL", short: "TSLA", kind: "direct", speed: 1700, blast: 28, chain: 2, manual: true, reload: 650, mag: 4, cd: 2300, minWave: 31, sfx: "rail", color: "#b388ff" },   // chains to 2; deliberate fire so it can't faceroll
+    { id: "singularity", name: "SINGULARITY", short: "SING", kind: "arc", speed: 760, blast: 150, blackhole: true, manual: true, reload: 600, mag: 4, cd: 1700, minWave: 34, sfx: "cryo", color: "#c86bff" }   // late-game powerhouse: throw black holes fast; huge pull + core-devour + implosion (see _spawnBlackhole)
   ];
   // ---- balance model ----
   // reload = time between shots (from blast coverage x impacts and speed-to-target).
@@ -524,7 +524,7 @@
         addPod({ town: u.id }, u.name, u.color);
       };
       // weighted category roll — prefer weapons you DON'T have yet (the striving), then town upgrades, then a multi-fire
-      const lockedW = WEAPONS.filter(w => !w.base && !this.unlocked[w.id]);
+      const lockedW = WEAPONS.filter(w => !w.base && !this.unlocked[w.id] && this.wave >= w.minWave);   // hard wave-gate: only ~one new weapon unlocks every 3 waves
       const townPool = TOWN_UPGRADES.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
       const cats = [];
       if (lockedW.length) cats.push(["weapon", 6]);
@@ -535,7 +535,7 @@
       for (const c of cats) { if (r < c[1]) { pick = c[0]; break; } r -= c[1]; }
       if (pick === "mult") return mult();
       if (pick === "town") return town();
-      const w = this._weightedPick(lockedW, x => x.minWave);   // progressive: powerful weapons are rare, common ones likely
+      const w = lockedW.reduce((a, b) => (b.minWave < a.minWave ? b : a));   // hand out the NEXT (weakest) eligible weapon -> best gear arrives late
       addPod({ weapon: w.id }, w.name, w.color);
     }
 
@@ -1363,16 +1363,19 @@
       }
       if (this.betweenWaves) {   // breather countdown between waves
         const p = th.palette, s = this.uiScale || 1, cy = this._h * 0.40, pulse = 0.5 + 0.5 * Math.sin(now / 260);
+        const maxW = this._w - Math.round(28 * s);   // shrink any line that would run off a narrow screen
+        const cleared = "WAVE " + this.wave + " CLEARED", flourish = "⚡ FRESH DROPS INCOMING — ANYTHING IS POSSIBLE ⚡", next = "WAVE " + (this.wave + 1) + " IN " + Math.ceil(this.waveBreakT / 1000);
         ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
         if (th.effects.glow) { ctx.shadowBlur = 16; ctx.shadowColor = p.accent; }
-        ctx.fillStyle = p.accent; ctx.font = "800 " + Math.round(30 * s) + "px " + th.fonts.ui;
-        ctx.fillText("WAVE " + this.wave + " CLEARED", this._w / 2, cy);
+        ctx.fillStyle = p.accent; this._fitFont(ctx, "800", 30 * s, th.fonts.ui, cleared, maxW);
+        ctx.fillText(cleared, this._w / 2, cy);
         // new-round flourish: fresh supplies, anything is possible
-        ctx.fillStyle = "#ffe14d"; ctx.globalAlpha = 0.6 + 0.4 * pulse; ctx.font = "800 " + Math.round(16 * s) + "px " + th.fonts.ui;
+        ctx.fillStyle = "#ffe14d"; ctx.globalAlpha = 0.6 + 0.4 * pulse;
         if (th.effects.glow) ctx.shadowColor = "#ffe14d";
-        ctx.fillText("⚡ FRESH DROPS INCOMING — ANYTHING IS POSSIBLE ⚡", this._w / 2, cy + Math.round(30 * s));
-        ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.fillStyle = p.textDim; ctx.font = "600 " + Math.round(18 * s) + "px " + th.fonts.ui;
-        ctx.fillText("WAVE " + (this.wave + 1) + " IN " + Math.ceil(this.waveBreakT / 1000), this._w / 2, cy + Math.round(58 * s));
+        this._fitFont(ctx, "800", 16 * s, th.fonts.ui, flourish, maxW);
+        ctx.fillText(flourish, this._w / 2, cy + Math.round(30 * s));
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.fillStyle = p.textDim; this._fitFont(ctx, "600", 18 * s, th.fonts.ui, next, maxW);
+        ctx.fillText(next, this._w / 2, cy + Math.round(58 * s));
         ctx.restore();
       }
       this._renderToasts(ctx, R, th, now);
@@ -1409,14 +1412,22 @@
       ctx.restore();
     }
 
+    // Set ctx.font to the requested size, but SHRINK it so `text` is never wider than maxW — guarantees on-screen text.
+    _fitFont(ctx, weight, px, family, text, maxW) {
+      ctx.font = weight + " " + Math.round(px) + "px " + family;
+      const tw = ctx.measureText(text).width;
+      if (tw > maxW && tw > 0) ctx.font = weight + " " + Math.max(7, Math.floor(px * maxW / tw)) + "px " + family;
+    }
+
     _renderToasts(ctx, R, th, now) {
       if (!this.toasts.length) return;
+      const s = this.uiScale || 1, maxW = this._w - Math.round(28 * s);   // keep a side margin so toasts never run off the edge
       ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
       for (let i = 0; i < this.toasts.length; i++) {
         const t = this.toasts[i], pr = (now - t.born) / t.life;
         const alpha = pr < 0.15 ? pr / 0.15 : (1 - (pr - 0.15) / 0.85);
         ctx.globalAlpha = Math.max(0, alpha);
-        ctx.font = "800 " + (t.big ? 28 : 18) + "px " + th.fonts.ui;
+        this._fitFont(ctx, "800", (t.big ? 28 : 18) * Math.min(1.15, s), th.fonts.ui, t.text, maxW);   // scale + shrink-to-fit
         const tc = t.color || th.palette.accent;
         if (th.effects.glow) { ctx.shadowBlur = 14; ctx.shadowColor = tc; }
         ctx.fillStyle = tc;
