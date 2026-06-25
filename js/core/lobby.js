@@ -96,6 +96,8 @@
       this.phase = null; this.online = false; this.role = null; this.code = ""; this.peerName = ""; this.connected = false;
       this.entering = false; this._entry = ""; this._verdict = null; this._note = ""; this._noteT = 0;
       this.net = null; this._uiBtns = []; this._sendTimers = {}; this._leaving = false;
+      this._hostVP = null;   // {w,h} the HOST's world size — the guest adopts it (forced aspect ratio + letterbox), so both see the SAME layout
+      this._vp = null;       // cached letterbox fit {scale,offX,offY,hw,hh} for the current canvas size (guest only)
       if ((cfg.w && typeof cfg.w !== "function") || (cfg.theme && typeof cfg.theme !== "function")) console.warn("Arcade.Lobby: pass w/h/theme as GETTER functions so resize/skin changes are seen live.");
     }
     isHost() { return this.role === "host"; }
@@ -142,13 +144,19 @@
       if (!m || !m.t) return;
       if (m.t === "msg") { if (this.cfg.onMessage) this.cfg.onMessage(m.d, this.role); }
       else if (m.t === "rematch") { if (this.isHost()) this._startMatch(true, true); }
-      else if (m.t === "emote") { if (m.k === "start") this._startMatch(true, false); else if (m.k === "end") this._end(m.v, false); }
+      else if (m.t === "emote") {
+        if (m.k === "start") this._startMatch(true, false);
+        else if (m.k === "end") this._end(m.v, false);
+        else if (m.k === "vp") { this._hostVP = { w: m.w, h: m.h }; this._vp = null; if (this.cfg.onViewport) this.cfg.onViewport(this._hostVP); }   // adopt the HOST's world size (forced aspect ratio)
+      }
       else if (m.t === "bye") { this._end({ reason: "left" }, false); }
     }
     _startMatch(rematch, relay) {
-      this._verdict = null; this._setPhase("play");
+      this._verdict = null; this._setPhase("play"); this._vp = null;
       if (this.cfg.onStart) this.cfg.onStart({ role: this.role, code: this.code, peer: this.peerName, rematch: !!rematch });
       if (relay && this.isHost() && this.net) this.net.send({ t: "emote", k: "start" });
+      // HOST broadcasts its world size so the GUEST adopts the same aspect ratio + layout (rides the relayed "emote" channel — no server change)
+      if (this.isHost() && this.net) this.net.send({ t: "emote", k: "vp", w: Math.round(this._w()), h: Math.round(this._h()) });
     }
     _end(verdict, relay) {
       if (this.phase === "ended") return;
@@ -165,6 +173,61 @@
     }
     tick(dt) { this._clock = (this._clock || 0) + dt; if (this._noteT > 0) this._noteT -= dt; }   // game calls each frame so throttle + notes advance
     end(verdict) { this._end(verdict, true); }   // HOST-only authoritative match-over
+
+    // ============ SHARED HOST-VIEWPORT (forced aspect ratio + letterbox) ============
+    // The GUEST adopts the HOST's logical world size and we letterbox-fit it into the guest's own
+    // canvas with a UNIFORM scale, so both players see the SAME layout regardless of screen size.
+    // No-op for the host and for offline play (identity transform / local coords).
+    usingHostWorld() { return this.isGuest() && this.online && !!this._hostVP && this._hostVP.w > 0 && this._hostVP.h > 0; }
+    // World dimensions the GAME should LAY OUT / SIMULATE / RENDER in.
+    worldW() { return this.usingHostWorld() ? this._hostVP.w : this._w(); }
+    worldH() { return this.usingHostWorld() ? this._hostVP.h : this._h(); }
+    // Letterbox fit of the host world into THIS canvas (CSS px). Cached; invalidated on resize / new match.
+    _fit() {
+      if (this._vp) return this._vp;
+      const cw = this._w(), ch = this._h(), hw = this.worldW(), hh = this.worldH();
+      const scale = Math.min(cw / hw, ch / hh);
+      return (this._vp = { scale: scale, offX: (cw - hw * scale) / 2, offY: (ch - hh * scale) / 2, hw: hw, hh: hh });
+    }
+    // Wrap GAMEPLAY drawing: applyViewport(ctx) … endViewport(ctx). Identity for host/offline.
+    applyViewport(ctx) {
+      ctx.save();
+      if (this.usingHostWorld()) { const v = this._fit(); ctx.translate(v.offX, v.offY); ctx.scale(v.scale, v.scale); }
+      return true;
+    }
+    endViewport(ctx) { ctx.restore(); }
+    // Paint the letterbox slack (bars) outside the host-world rect. Guest only; call right after the bg fill.
+    drawLetterboxBars(ctx, color) {
+      if (!this.usingHostWorld()) return;
+      const v = this._fit(), cw = this._w(), ch = this._h();
+      ctx.save(); ctx.fillStyle = color || "#05070d";
+      if (v.offX > 0.5) { ctx.fillRect(0, 0, v.offX, ch); ctx.fillRect(cw - v.offX, 0, v.offX, ch); }
+      if (v.offY > 0.5) { ctx.fillRect(0, 0, cw, v.offY); ctx.fillRect(0, ch - v.offY, cw, v.offY); }
+      ctx.restore();
+    }
+    // Inverse transform: a pointer event's client coords -> WORLD coords (for gameplay hit-tests / aim).
+    // Identity-ish (plain CSS-space) for host/offline, matching the games' existing manual mapping.
+    mapPoint(clientX, clientY) {
+      const r = this.canvas.getBoundingClientRect();
+      let x = (clientX - r.left) * (this._w() / r.width), y = (clientY - r.top) * (this._h() / r.height);
+      if (this.usingHostWorld()) { const v = this._fit(); x = (x - v.offX) / v.scale; y = (y - v.offY) / v.scale; }
+      return { x: x, y: y };
+    }
+    // The game calls this at the end of its resize(): invalidates the fit; HOST re-broadcasts its world size mid-match.
+    notifyResize() {
+      this._vp = null;
+      if (!(this.isHost() && this.online && this.phase === "play" && this.net)) return;
+      const now = this._clock || 0;   // coalesce window drag-resize storms so vp can't flood the relay's per-second cap
+      if (now - (this._lastVpT || -1e9) < 140) return;
+      this._lastVpT = now;
+      this.net.send({ t: "emote", k: "vp", w: Math.round(this._w()), h: Math.round(this._h()) });
+    }
+    // Self-healing fallback: if the one-shot vp emote was ever lost, the guest adopts the host world
+    // from the game's own periodic stream (which carries host w/h). No-op once dims already match.
+    noteHostViewport(w, h) {
+      if (!w || !h || !this.isGuest()) return;
+      if (!this._hostVP || this._hostVP.w !== w || this._hostVP.h !== h) { this._hostVP = { w: w, h: h }; this._vp = null; if (this.cfg.onViewport) this.cfg.onViewport(this._hostVP); }
+    }
     rematch() { if (this.isHost()) this._startMatch(true, true); else { if (this.net) this.net.send({ t: "rematch" }); this._toast("Asked host for rematch…"); } }
     _verdictText() {
       const v = this._verdict || {};
