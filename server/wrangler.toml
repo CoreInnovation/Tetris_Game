@@ -1,0 +1,13 @@
+name = "chriskit-arcade"
+main = "src/worker.js"
+compatibility_date = "2024-09-23"
+
+# Per-room real-time state lives in a Durable Object.
+[[durable_objects.bindings]]
+name = "PONG_ROOM"
+class_name = "PongRoom"
+
+# New SQLite-backed Durable Objects (available on the Workers FREE plan).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PongRoom"]
