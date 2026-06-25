@@ -13,6 +13,9 @@
 
   const P = Arcade.Pong;
   const START_LIVES = 3;
+  const MOMENTUM_FRICTION = 0.990;   // per-ms velocity decay → a flicked paddle glides ~0.35s then settles (tasteful, not slippery)
+  const FLICK_MIN = 0.02;            // px/ms below which we stop gliding
+  const SENS_DEFAULT = 1.7;          // punchier thumb→paddle ratio: move the thumb less, paddle moves more
 
   function rand(a, b) { return a + Math.random() * (b - a); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -29,8 +32,8 @@
       this.pointerInput = true;            // we use drag/pointer — hide the touch button bar
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600;
-      this.moveDir = 0; this._ptrActive = false; this._ptrMode = "mouse"; this.targetX = 0;
-      this.touchSens = clamp(ctx.storage.get("pong:sens", 1), 0.4, 2.5);   // mobile drag sensitivity
+      this.moveDir = 0; this._ptrActive = false; this._ptrMode = "mouse"; this.targetX = 0; this._vx = 0;
+      this.touchSens = clamp(ctx.storage.get("pong:sens", SENS_DEFAULT), 0.5, 3.5);   // mobile drag sensitivity (punchier default)
       // ---- online multiplayer (Cloudflare-backed; offline vs-CPU is the default) ----
       this.mode = "cpu";          // "cpu" | "online"
       this.net = null; this.netRole = null; this.netPhase = null;   // "lobby"|"waiting"|"play"|"ended"
@@ -45,7 +48,7 @@
     _reset() {
       this.score = 0; this.lives = START_LIVES;
       this.points = 0; this.cpu = 0;        // points you scored on CPU / on you
-      this.rally = 0; this.shakeMag = 0; this.flash = 0; this.toasts = []; this.trail = [];
+      this.rally = 0; this.shakeMag = 0; this.flash = 0; this.toasts = []; this.trail = []; this._vx = 0;
       this.state = "playing"; this.paused = false;
       this._layout();
       this._serve(Math.random() < 0.5 ? 1 : -1);   // dir: +1 toward player (down), -1 toward CPU (up)
@@ -74,9 +77,9 @@
       return {
         control: {
           sliders: [{
-            id: "sens", name: "Touch sensitivity", min: 0.4, max: 2.5, step: 0.1, value: this.touchSens,
+            id: "sens", name: "Touch sensitivity", min: 0.5, max: 3.5, step: 0.1, value: this.touchSens,
             format: (v) => v.toFixed(1) + "×",
-            set: (v) => { self.touchSens = v; self.shell.storage.set("pong:sens", v); }
+            set: (v) => { self.touchSens = clamp(v, 0.5, 3.5); self.shell.storage.set("pong:sens", self.touchSens); }
           }]
         },
         skin: { options: P.Themes.map(t => ({ id: t.id, name: t.name })), current: this.theme.id,
@@ -141,7 +144,7 @@
       // finger's *movement* (× sensitivity). No jump-to-finger; drag from anywhere on screen.
       this._tstart = (e) => { const t = e.touches && e.touches[0]; if (!t) return; if (this._uiHit(t.clientX, t.clientY)) { e.preventDefault(); return; } if (this.paused || this.state !== "playing" || this.netPhase === "lobby" || this.netPhase === "waiting") return; e.preventDefault(); this._dragX0 = courtX(t.clientX); this._padX0 = this._ctrlPaddle().x; this.targetX = this._padX0; this._ptrActive = true; this._ptrMode = "touch"; };
       this._tmove = (e) => { if (this.paused || this.state !== "playing" || this.netPhase === "lobby" || this.netPhase === "waiting") return; const t = e.touches && e.touches[0]; if (!t) return; e.preventDefault(); if (this._dragX0 == null) { this._dragX0 = courtX(t.clientX); this._padX0 = this._ctrlPaddle().x; } this.targetX = this._padX0 + (courtX(t.clientX) - this._dragX0) * this.touchSens; this._ptrMode = "touch"; this._ptrActive = true; };
-      this._tend = () => { this._dragX0 = null; };
+      this._tend = () => { this._dragX0 = null; this._ptrActive = false; };   // release → paddle keeps its flick momentum (glides in update)
       canvas.addEventListener("mousemove", this._mm);
       canvas.addEventListener("touchstart", this._tstart, { passive: false });
       canvas.addEventListener("touchmove", this._tmove, { passive: false });
@@ -248,13 +251,25 @@
       const minX = c.x + this.pw / 2, maxX = c.x + c.w - this.pw / 2;
       // ---- local paddle (bottom for host/CPU, top for guest) ----
       const me = this._ctrlPaddle();
+      const prevX = me.x; let controlled = false;
       if (this._ptrActive) {
         const tx = clamp(this.targetX, minX, maxX);
         if (this._ptrMode === "touch") { me.x = tx; }                                  // relative drag → 1:1
         else { const d = tx - me.x, step = this.pSpeed * 2.6 * dt; me.x += clamp(d, -step, step); }   // mouse: eased absolute
+        controlled = true;
       } else if (this.moveDir !== 0) {
         me.x = clamp(me.x + this.moveDir * this.pSpeed * dt, minX, maxX);
+        controlled = true;
       }
+      if (controlled) {
+        // track paddle velocity (EMA) so a flick carries momentum on release
+        const inst = (me.x - prevX) / Math.max(1, dt);
+        this._vx = this._vx == null ? inst : this._vx * 0.55 + inst * 0.45;
+      } else if (Math.abs(this._vx || 0) > FLICK_MIN) {
+        // GLIDE: residual momentum after a flick, decaying with friction
+        me.x += this._vx * dt; this._vx *= Math.pow(MOMENTUM_FRICTION, dt);
+        if (me.x <= minX) { me.x = minX; this._vx = 0; } else if (me.x >= maxX) { me.x = maxX; this._vx = 0; }
+      } else this._vx = 0;
       me.x = clamp(me.x, minX, maxX);
 
       // ===== GUEST: no local sim — send input, dead-reckon the ball between host snapshots =====
