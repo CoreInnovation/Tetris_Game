@@ -215,6 +215,9 @@ html, body {
 .chooser-body { display: flex; flex-direction: column; gap: 8px; max-height: 58vh; overflow-y: auto; -webkit-overflow-scrolling: touch; margin-bottom: 4px; }
 .chooser-label { color: var(--muted); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; margin: 10px 0 2px; text-align: left; }
 .chooser-body .btn { font-size: 14px; }
+.chooser-slider { display: flex; align-items: center; gap: 12px; padding: 2px 2px 6px; }
+.chooser-slider input[type=range] { flex: 1; height: 28px; accent-color: var(--accent, #5ad1ff); cursor: pointer; }
+.chooser-slider-val { min-width: 52px; text-align: right; color: var(--accent, #5ad1ff); font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
 
 .btn {
   background: rgba(255, 255, 255, 0.06);

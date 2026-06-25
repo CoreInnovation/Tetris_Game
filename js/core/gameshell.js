@@ -352,12 +352,25 @@
       body.innerHTML = "";
       const label = (t) => { const h = document.createElement("div"); h.className = "chooser-label"; h.textContent = t; body.appendChild(h); };
       const btn = (name, active, onClick) => { const b = document.createElement("button"); b.className = "btn" + (active ? " primary" : ""); b.textContent = name; b.addEventListener("click", () => { this.audio.unlock(); onClick(); }); body.appendChild(b); };
+      // a live slider row (label + value readout + native range input — touch-draggable on mobile)
+      const slider = (sl) => {
+        label(sl.name);
+        const row = document.createElement("div"); row.className = "chooser-slider";
+        const val = document.createElement("span"); val.className = "chooser-slider-val";
+        const fmt = (v) => sl.format ? sl.format(v) : String(v);
+        val.textContent = fmt(sl.value);
+        const r = document.createElement("input"); r.type = "range";
+        r.min = sl.min; r.max = sl.max; r.step = sl.step != null ? sl.step : 1; r.value = sl.value;
+        r.addEventListener("input", () => { const v = parseFloat(r.value); sl.value = v; val.textContent = fmt(v); sl.set(v); });
+        row.appendChild(r); row.appendChild(val); body.appendChild(row);
+      };
       if (kind === "music" && menus.music) menus.music.options.forEach(o => btn(o.name, o.id === menus.music.current, () => { menus.music.set(o.id); this._closeChooser(); }));
       else if (kind === "skin" && menus.skin) menus.skin.options.forEach(o => btn(o.name, o.id === menus.skin.current, () => { menus.skin.set(o.id); this._closeChooser(); }));
       else if (kind === "control" && menus.control) {
         const c = menus.control;
         if (c.profiles) { label("Layout"); c.profiles.forEach(o => btn(o.name, o.id === c.profile, () => { c.setProfile(o.id); this._refreshTouchLayout(); const g = this._game; requestAnimationFrame(() => { if (g && g.resize) g.resize(this._cssW, this._cssH, this._touchInset()); }); this._renderChooser(); })); }
         if (c.toggles) { label("Options"); c.toggles.forEach(t => btn(t.name + (t.on ? "   ✓" : "   ✕"), t.on, () => { t.set(!t.on); this._renderChooser(); })); }
+        if (c.sliders) c.sliders.forEach(sl => slider(sl));
       } else this._closeChooser();
     }
 
