@@ -77,6 +77,13 @@
             <div><span class="rs-label" id="goBestLabel">Best</span><span id="goBest" class="rs-value">0</span></div>
             <div id="goNew" class="new-best hidden">★ NEW BEST ★</div>
           </div>
+          <div id="goBoard" class="go-board hidden">
+            <div class="go-board-head">
+              <span class="go-board-title">⇄ GLOBAL TOP</span>
+              <input id="goName" class="go-name" maxlength="16" placeholder="your name" aria-label="Leaderboard name" />
+            </div>
+            <ol id="goBoardList" class="go-board-list"></ol>
+          </div>
           <button class="btn primary" data-action="restart">Play Again</button>
           <button class="btn ghost" data-action="quit">Quit to Menu</button>
         </div>
@@ -92,6 +99,7 @@
   <script src="js/core/pointer.js"></script>
   <script src="js/core/net.js"></script>
   <script src="js/core/lobby.js"></script>
+  <script src="js/core/scores.js"></script>
   <script src="js/core/loop.js"></script>
   <script src="js/core/particles.js"></script>
   <script src="js/core/audio.js"></script>

@@ -31,7 +31,10 @@
       goScore: $("goScore"),
       goBest: $("goBest"),
       goBestLabel: $("goBestLabel"),
-      goNew: $("goNew")
+      goNew: $("goNew"),
+      goBoard: $("goBoard"),
+      goBoardList: $("goBoardList"),
+      goName: $("goName")
     });
     // Handy for debugging from the console.
     window.__arcade = shell;

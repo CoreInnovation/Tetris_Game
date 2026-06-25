@@ -35,6 +35,19 @@ The static arcade (GitHub Pages) stays exactly as-is — this is a separate, add
 That's it. In Pong, tap **⇄ PLAY ONLINE → CREATE GAME**, share the 4-letter code,
 your coworker taps **JOIN GAME** and enters it. First to 7 wins.
 
+## Shared leaderboards (D1) — optional, ~2 more minutes
+Every game's Game Over screen shows a **GLOBAL TOP** board (per game, mobile/desktop separate).
+It needs a D1 database:
+```
+cd server
+wrangler d1 create chriskit-arcade
+# paste the printed database_id into wrangler.toml (the [[d1_databases]] block)
+wrangler d1 execute chriskit-arcade --remote --file=./schema.sql
+wrangler deploy
+```
+The client reuses the same Worker URL (it derives `https://` from the `wss://` you set in net.js),
+so no extra config. Until D1 is set up the board just stays hidden — games play normally.
+
 ## Cost / plan
 Durable Objects use the new **SQLite-backed** class (see `wrangler.toml`), which is on the
 **Workers free plan**. If your account prompts for the Workers Paid plan ($5/mo), that's the

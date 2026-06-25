@@ -296,6 +296,29 @@
       this._hide(this.refs.pauseOverlay);   // don't leave a pause overlay stacked under game-over
       this._hide(this.refs.pauseBtn);       // pause is meaningless once the game is over
       this._show(this.refs.gameoverOverlay);
+      this._lastScore = score; this._lastGameId = this._module.id;
+      this._submitAndShowBoard(this._module.id, score);
+    }
+
+    // ---- shared online leaderboard on the game-over screen ----
+    _playerName() { return (this.storage.get("arcade:player", "") || "").slice(0, 16); }
+    _submitAndShowBoard(gameId, score) {
+      const board = this.refs.goBoard; if (!board) return;
+      if (!Arcade.Scores || !Arcade.Scores.configured()) { this._hide(board); return; }
+      this._show(board);
+      const device = this.isTouch ? "mobile" : "desktop";
+      if (this.refs.goName && this.refs.goName.value !== this._playerName()) this.refs.goName.value = this._playerName();
+      const render = (rows) => {
+        const list = this.refs.goBoardList; if (!list) return;
+        list.innerHTML = (rows && rows.length)
+          ? rows.map((r, i) => '<li><span class="gb-rank">' + (i + 1) + '</span><span class="gb-name">' + esc(r.name) + '</span><span class="gb-score">' + Number(r.score).toLocaleString() + "</span></li>").join("")
+          : '<li class="gb-empty">No scores yet — be the first!</li>';
+      };
+      render([]); if (this.refs.goBoardList) this.refs.goBoardList.innerHTML = '<li class="gb-empty">Loading…</li>';
+      const name = this._playerName();
+      const after = () => Arcade.Scores.top(gameId, 10, device).then(render);
+      if (name && score > 0) Arcade.Scores.submit(gameId, name, score, device).then(after, after);
+      else after();
     }
 
     restartGame() {
@@ -389,6 +412,17 @@
       this.refs.themeBtn.addEventListener("click", () => { const m = this._gameMenus(); if (m && m.skin) this._openChooser("skin"); else this.cycleTheme(); });
       this.refs.musicBtn.addEventListener("click", () => { this.audio.unlock(); const m = this._gameMenus(); if (m && m.music) this._openChooser("music"); else this.cycleMusic(); });
       this.refs.devBtn.addEventListener("click", () => this.toggleDev());
+      if (this.refs.goName) {
+        const saveName = () => {
+          const v = this.refs.goName.value.replace(/[^\x20-\x7E]/g, "").trim().slice(0, 16);
+          this.refs.goName.value = v; this.storage.set("arcade:player", v);
+          if (v && this._lastGameId) this._submitAndShowBoard(this._lastGameId, this._lastScore || 0);   // (re)submit under the new name
+        };
+        this.refs.goName.addEventListener("change", saveName);
+        this.refs.goName.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); this.refs.goName.blur(); } });
+        // typing into the name field must not leak to the game's keyboard handlers
+        this.refs.goName.addEventListener("keydown", (e) => e.stopPropagation());
+      }
     }
 
     _wireOverlays() {
