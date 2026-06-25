@@ -259,6 +259,23 @@ html, body {
 }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
+/* ---- shared online leaderboard on the game-over screen ---- */
+.go-board { margin: 10px 0 12px; text-align: left; }
+.go-board.hidden { display: none; }
+.go-board-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.go-board-title { font-size: 11px; letter-spacing: 2px; color: var(--accent); font-weight: 800; }
+.go-name {
+  width: 120px; max-width: 50%; padding: 4px 8px; font-size: 13px; border-radius: 8px;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text); font-family: var(--mono-font);
+}
+.go-name:focus { outline: none; border-color: var(--accent); }
+.go-board-list { list-style: none; margin: 0; padding: 0; max-height: 168px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.go-board-list li { display: flex; align-items: center; gap: 8px; padding: 3px 4px; font-family: var(--mono-font); font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.go-board-list .gb-rank { width: 22px; color: var(--muted); text-align: right; }
+.go-board-list .gb-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.go-board-list .gb-score { font-weight: 800; color: var(--accent); }
+.go-board-list .gb-empty { color: var(--muted); justify-content: center; }
+
 /* ===================== TOUCH CONTROLS ===================== */
 .touch-controls {
   position: absolute;

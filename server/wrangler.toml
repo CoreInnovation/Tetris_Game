@@ -11,3 +11,11 @@ class_name = "PongRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PongRoom"]
+
+# Shared leaderboards database (D1). Create it once, then paste the printed database_id below:
+#   wrangler d1 create chriskit-arcade
+#   wrangler d1 execute chriskit-arcade --remote --file=./schema.sql
+[[d1_databases]]
+binding = "DB"
+database_name = "chriskit-arcade"
+database_id = "PUT-YOUR-D1-DATABASE-ID-HERE"
