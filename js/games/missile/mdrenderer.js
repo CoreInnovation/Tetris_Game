@@ -492,13 +492,13 @@
       ctx.restore();
     }
 
-    // Center-top "NEW WEAPON" banner — compact, PULSING (begs to be clicked), with a
-    // countdown bar. Clicking it equips the weapon and pops a flash (see _bannerBoom).
+    // Center-top "NEW WEAPON" banner with a big, classy, PULSING "CLICK TO ARM" call-to-action.
+    // Clicking it equips the weapon and pops/shatters (see _bannerBoom / _shatterBanner).
     drawNewWeaponBanner(ctx, theme, d) {
       const p = theme.palette, w = this.w, col = d.color || p.accent, s = d.scale || 1, now = d.now || 0;
       const fs = (px) => Math.round(px * s);
-      const bw = Math.min(Math.round(286 * s), w - 36), bh = Math.round(48 * s);   // a touch smaller than before
-      const bx = (w - bw) / 2, by = Math.max(46, this.h * 0.11);
+      const bw = Math.min(Math.round(330 * s), w - 36), bh = Math.round(66 * s);
+      const bx = (w - bw) / 2, by = Math.max(46, this.h * 0.10);
       const rect = { x: bx, y: by, w: bw, h: bh };   // returned for click hit-testing (equip-on-click)
       const t = Math.max(0, Math.min(1, d.frac));          // 1 -> 0
       const a = Math.max(0, Math.min(1, Math.min((1 - t) / 0.07, t / 0.16)));   // fade in first ~7%, out last ~16%
@@ -507,33 +507,43 @@
       const cx = bx + bw / 2, cy = by + bh / 2;
       ctx.save();
       ctx.globalAlpha = a;
-      // a click "pop": briefly scale the whole banner up
-      if (pop > 0) { const sc = 1 + pop * 0.16; ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy); }
-      // panel
-      ctx.fillStyle = rgba("#0b1018", 0.9); rr(ctx, bx, by, bw, bh, 12); ctx.fill();
-      // PULSING border + glow so it obviously wants a click
+      if (pop > 0) { const sc = 1 + pop * 0.16; ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy); }   // click "pop"
+      // panel + pulsing border/glow
+      ctx.fillStyle = rgba("#0b1018", 0.92); rr(ctx, bx, by, bw, bh, 12); ctx.fill();
       ctx.lineWidth = 2 + 1.4 * pulse; ctx.strokeStyle = col;
       if (theme.effects.glow) { ctx.shadowBlur = 12 + 14 * pulse; ctx.shadowColor = col; }
       rr(ctx, bx, by, bw, bh, 12); ctx.stroke(); ctx.shadowBlur = 0;
-      // weapon icon
-      this.drawWeaponIcon(ctx, d.id, bx + fs(28), by + bh / 2 - fs(2), fs(20), col);
-      // labels
-      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      // top row: icon + "NEW WEAPON — NAME"
+      this.drawWeaponIcon(ctx, d.id, bx + fs(26), by + fs(20), fs(20), col);
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
       ctx.fillStyle = rgba(p.textDim, 0.95); ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui;
-      ctx.fillText("NEW WEAPON", bx + fs(52), by + fs(19));
-      ctx.fillStyle = col; ctx.font = "900 " + fs(17) + "px " + theme.fonts.ui;
-      if (theme.effects.glow) { ctx.shadowBlur = 8 + 8 * pulse; ctx.shadowColor = col; }
-      ctx.fillText(d.name, bx + fs(52), by + fs(37)); ctx.shadowBlur = 0;
-      // select hint (or EQUIPPED tick if it's already the active weapon)
-      ctx.textAlign = "right"; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui;
-      if (d.active) { ctx.fillStyle = "#9aff8a"; ctx.fillText("EQUIPPED ✓", bx + bw - fs(11), by + fs(16)); }
-      else { ctx.fillStyle = rgba(p.textDim, 0.85); ctx.fillText(d.keyNum <= 9 ? ("PRESS " + d.keyNum + " · OR CLICK") : "CLICK TO EQUIP", bx + bw - fs(11), by + fs(16)); }
+      ctx.fillText("NEW WEAPON", bx + fs(48), by + fs(14));
+      ctx.fillStyle = col; ctx.font = "900 " + fs(15) + "px " + theme.fonts.ui;
+      if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = col; }
+      ctx.fillText(d.name, bx + fs(48), by + fs(29)); ctx.shadowBlur = 0;
+      if (d.keyNum <= 9) { ctx.fillStyle = rgba(p.textDim, 0.8); ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.fillText("KEY [" + d.keyNum + "]", bx + bw - fs(12), by + fs(14)); }
+      // the STAR: a big pulsing "CLICK TO ARM" call-to-action (or "ARMED ✓" once selected)
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const ctaY = by + bh - fs(17);
+      if (d.active) {
+        ctx.fillStyle = "#9aff8a"; ctx.font = "900 " + fs(15) + "px " + theme.fonts.ui;
+        if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = "#9aff8a"; }
+        ctx.fillText("✓  ARMED", cx, ctaY); ctx.shadowBlur = 0;
+      } else {
+        const flash = 0.62 + 0.38 * pulse;   // smooth flashing pulse
+        ctx.globalAlpha = a * flash;
+        if (ctx.letterSpacing !== undefined) ctx.letterSpacing = fs(2) + "px";   // classy spacing where supported
+        ctx.fillStyle = col; ctx.font = "900 " + fs(16) + "px " + theme.fonts.ui;
+        if (theme.effects.glow) { ctx.shadowBlur = 8 + 12 * pulse; ctx.shadowColor = col; }
+        ctx.fillText("▸  CLICK TO ARM  ◂", cx, ctaY); ctx.shadowBlur = 0;
+        if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "0px";
+        ctx.globalAlpha = a;
+      }
       // countdown bar
       const cbh = Math.max(2, fs(3));
-      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx + fs(11), by + bh - fs(8), bw - fs(22), cbh);
-      ctx.fillStyle = col; ctx.fillRect(bx + fs(11), by + bh - fs(8), (bw - fs(22)) * t, cbh);
-      // click flash overlay (the "explosion" confirmation)
-      if (pop > 0) { ctx.globalAlpha = a * pop * 0.55; ctx.fillStyle = "#ffffff"; rr(ctx, bx, by, bw, bh, 12); ctx.fill(); }
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx + fs(11), by + bh - fs(7), bw - fs(22), cbh);
+      ctx.fillStyle = col; ctx.fillRect(bx + fs(11), by + bh - fs(7), (bw - fs(22)) * t, cbh);
+      if (pop > 0) { ctx.globalAlpha = a * pop * 0.55; ctx.fillStyle = "#ffffff"; rr(ctx, bx, by, bw, bh, 12); ctx.fill(); }   // click flash
       ctx.restore();
       return rect;
     }
