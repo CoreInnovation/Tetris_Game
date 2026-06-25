@@ -162,8 +162,24 @@
       this.pointerInput = true; this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600; this.weaponChips = [];
+      // ---- CO-OP via Arcade.Lobby (host runs the sim; guest is a 2nd gun). Offline is the default + untouched. ----
+      this.myName = ctx.storage.get("arcade:player", "") || ("P" + (1000 + (Math.random() * 9000 | 0)));
+      this.coopSnap = null; this.guestAim = null;
+      const self = this;
+      this.lobby = Arcade.Lobby ? new Arcade.Lobby({
+        canvas: ctx.canvas, audio: ctx.audio,
+        w: () => this._w, h: () => this._h, theme: () => this.theme, name: () => this.myName,
+        gameId: "missile", title: "CO-OP DEFENSE", rules: "Defend the cities together",
+        onStart: (info) => self._startCoop(info),
+        onMessage: (m, role) => self._onCoopMsg(m, role),
+        onEnd: () => {},
+        onLeave: () => { self._reset(); }
+      }) : null;
       this._bindInput();
     }
+    _coop() { return !!(this.lobby && this.lobby.phase === "play"); }
+    _isHost() { return !!(this.lobby && this.lobby.isHost()); }
+    _isGuest() { return !!(this.lobby && this.lobby.isGuest()); }
 
     start() { this._reset(); }
     restart() { this._reset(); }
@@ -214,6 +230,7 @@
       if (this._pu) c.removeEventListener("pointerup", this._pu);
       if (this._pw) c.removeEventListener("wheel", this._pw);
       if (this._cm) c.removeEventListener("contextmenu", this._cm);
+      if (this.lobby) this.lobby.destroy();
       this._unsub.forEach(fn => fn()); this._unsub.length = 0;
     }
 
@@ -253,7 +270,9 @@
     _bindInput() {
       const input = this.shell.input, canvas = this.shell.canvas;
       this._unsub.push(input.onDown((code, e, repeat) => {
-        if (this.paused || this.state !== "playing" || repeat) return;
+        if (this.lobby && this.lobby.keydown(e)) return;        // typing a room code into the on-canvas keypad
+        if (this.paused || this.state !== "playing" || repeat || (this.lobby && this.lobby.blocking())) return;
+        if (this._isGuest()) return;                            // guest fires by clicking (no weapon/streak keys)
         if (code.indexOf("Digit") === 0) { const n = parseInt(code.slice(5), 10) - 1; if (n >= 0 && n < WEAPONS.length) this._selectWeapon(WEAPONS[n].id); return; }
         if (code === "Space") this._fire(this.aim.x, this.aim.y);
         else if (code === "KeyQ") this._selectWeapon(this._prevUnlocked());
@@ -266,7 +285,17 @@
       };
       this._pm = (e) => { if (this.paused || this.state !== "playing") return; const p = toLocal(e); this.aim.x = p.x; this.aim.y = p.y; };
       this._pd = (e) => {
+        if (this.lobby && this.lobby.pointerDown(e.clientX, e.clientY)) { e.preventDefault(); return; }   // lobby chrome (pill/keypad/buttons) first
         if (this.paused || this.state !== "playing") return; e.preventDefault();
+        if (this.lobby && this.lobby.blocking()) return;
+        if (this._isGuest()) {   // co-op guest: a play-area click fires at that point (relayed to the host)
+          if (e.button !== 0 && e.button !== undefined) return;
+          const gp = toLocal(e); if (gp.y >= this.dockTop) return;
+          this.aim.x = gp.x; this.aim.y = gp.y;
+          this.lobby.send({ t: "fire", nx: gp.x / this._w, ny: gp.y / this.groundY });
+          this._burst(gp.x, gp.y, this.theme.palette.accent || "#7afcff", 5);   // local tap feedback
+          return;
+        }
         if (e.button === 2) {   // RIGHT button: hold to pick a killstreak (scroll to change), release to FIRE it
           this._rmbDown = true; this._streakSel = Math.max(0, Math.min(this._streakSel || 0, this.streaks.length - 1));
           return;
@@ -844,7 +873,41 @@
 
     _shake(m) { this.shakeMag = Math.min(SHAKE_CAP, Math.max(this.shakeMag, m * SHAKE_SCALE)); }
     _toast(text, big, color) { this.toasts.push({ text: text, born: this._now, life: 1400, big: !!big, color: color || null }); if (this.toasts.length > 4) this.toasts.shift(); }
-    _gameOver() { if (this.state === "over") return; this.state = "over"; this.audio.stopMusic(); this.shell.requestGameOver({ score: this.score }); }
+    _gameOver() {
+      if (this.state === "over") return; this.state = "over"; this.audio.stopMusic();
+      if (this._coop()) {   // co-op: host submits the shared score + ends the match for both via the lobby (no shell overlay)
+        if (this._isHost()) {
+          if (Arcade.Scores && Arcade.Scores.configured()) Arcade.Scores.submit("missile", this.myName, this.score, this.shell.isTouch ? "mobile" : "desktop");
+          this.lobby.end({ coop: true, sub: "Wave " + this.wave + " · " + this.score.toLocaleString() });
+        }
+        return;
+      }
+      this.shell.requestGameOver({ score: this.score });
+    }
+
+    // ===================== CO-OP (host-authoritative; the guest is a 2nd cannon) =====================
+    _startCoop(info) {
+      this._reset();
+      this.coopSnap = null; this.guestAim = { x: this._w / 2, y: this._h * 0.4 };
+      this._toast(info.role === "host" ? "CO-OP — defend together!" : "CO-OP — joined! Defend together!", true, this.theme.palette.accent);
+    }
+    _onCoopMsg(m, role) {
+      if (!m) return;
+      if (role === "host") {
+        if (m.t === "fire") { const x = m.nx * this._w, y = m.ny * this.groundY; this.aim.x = x; this.aim.y = y; this._fire(x, y); }
+        else if (m.t === "aim") { this.guestAim = { x: m.nx * this._w, y: m.ny * this.groundY }; }
+      } else if (role === "guest" && m.t === "snap") { this._applyCoopSnap(m); }
+    }
+    _applyCoopSnap(m) { this.coopSnap = m; this.score = m.sc; this.wave = m.w; this.betweenWaves = !!m.bw; }
+    _coopBroadcast() {
+      if (!this.lobby) return;
+      const W = this._w || 1, GY = this.groundY || 1, r3 = (v) => Math.round(v * 1000) / 1000;
+      const e = []; for (let i = 0; i < this.enemies.length && i < 70; i++) { const m = this.enemies[i]; e.push([r3(m.x / W), r3(m.y / GY), Math.round((m.def && m.def.size) || m.size || 3), (m.def && m.def.color) || this.theme.palette.enemy]); }
+      const bl = []; for (let i = 0; i < this.explosions.length && i < 30; i++) { const x = this.explosions[i]; bl.push([r3(x.x / W), r3(x.y / GY), r3((x.r || 0) / W), x.color || "#ff8c2a"]); }
+      let cb = 0; this.cities.forEach((c, i) => { if (c.alive) cb |= (1 << i); });
+      let bb = 0; this.batteries.forEach((b, i) => { if (b.alive) bb |= (1 << i); });
+      this.lobby.sendThrottled({ t: "snap", w: this.wave, sc: this.score, bw: this.betweenWaves ? 1 : 0, c: cb, b: bb, e: e, bl: bl, hx: r3(this.aim.x / W), hy: r3(this.aim.y / GY) }, 20);
+    }
 
     // ---------------- update ----------------
     update(dt, now) {
@@ -853,6 +916,9 @@
       if (this.shakeMag > 0) { this.shakeMag -= dt * SHAKE_DECAY; if (this.shakeMag < 0) this.shakeMag = 0; }
       if (this.flash > 0) { this.flash -= dt / 350; if (this.flash < 0) this.flash = 0; }
       this.particles.update(dt);
+      if (this.lobby) this.lobby.tick(dt);
+      if (this.lobby && this.lobby.blocking()) return;        // a lobby overlay owns the screen → freeze the sim
+      if (this._isGuest()) { this._guestTick(dt); return; }   // co-op guest: no local sim — host is authoritative
       if (this.hintPow > 0) this.hintPow -= dt;        // ~5s "look here!" cues on the dock (tick even between waves)
       if (this.hintStreak > 0) this.hintStreak -= dt;
       if (this.hintArsenal > 0) this.hintArsenal -= dt;
@@ -1212,13 +1278,16 @@
         this.waveBreakT -= dt;
         if (this.waveBreakT <= 0) { this.betweenWaves = false; this._nextWave(); }
       }
+      if (this._isHost()) this._coopBroadcast();   // co-op: stream the authoritative snapshot to the guest
     }
+    _guestTick(dt) { if (this.lobby) this.lobby.sendThrottled({ t: "aim", nx: (this.aim.x / this._w) || 0, ny: (this.aim.y / this.groundY) || 0 }, 20); }
 
     // ---------------- render ----------------
     resize(w, h) { this._w = w; this._h = h; this._layout(w, h); this.renderer.w = w; this.renderer.h = h; this.renderer.groundY = this.groundY; }
 
     render(now) {
       const ctx = this.ctx2d, R = this.renderer, th = this.theme;
+      if (this._isGuest()) { this._renderGuest(ctx, R, th, now); if (this.lobby) this.lobby.render(now); R.drawScanlines(ctx, th); return; }
       R.drawBackground(ctx, th, now, this.groundY);
       let sx = 0, sy = 0;
       if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }   // freeze the shake while paused (no jank)
@@ -1299,7 +1368,36 @@
       }
       this._renderToasts(ctx, R, th, now);
       if (this.flash > 0) { ctx.save(); ctx.globalAlpha = this.flash * 0.5; ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, this._w, this._h); ctx.restore(); }
+      if (this.lobby) this.lobby.render(now);   // PLAY ONLINE pill (offline) / co-op lobby / keypad / result
       R.drawScanlines(ctx, th);
+    }
+
+    // co-op GUEST view: rendered from the host's snapshot (simple, clear tactical read)
+    _renderGuest(ctx, R, th, now) {
+      const snap = this.coopSnap, W = this._w, GY = this.groundY;
+      R.drawBackground(ctx, th, now, GY);
+      ctx.save();
+      R.drawGround(ctx, th, GY);
+      const cb = snap ? snap.c : 0, bb = snap ? snap.b : 0;
+      this.cities.forEach((c, i) => R.drawCity(ctx, th, c.x, !!(cb & (1 << i))));
+      this.batteries.forEach((b, i) => R.drawBattery(ctx, th, b.x, !!(bb & (1 << i))));
+      if (snap && snap.bl) for (const x of snap.bl) { const r = x[2] * W; R.drawExplosion(ctx, th, { x: x[0] * W, y: x[1] * GY, r: r, maxR: Math.max(1, r), color: x[3] }); }
+      if (snap && snap.e) for (const m of snap.e) this._drawGuestEnemy(ctx, th, m[0] * W, m[1] * GY, m[2], m[3]);
+      if (snap && snap.hx != null) R.drawCrosshair(ctx, th, snap.hx * W, snap.hy * GY, null, this.uiScale);   // host's aim
+      R.drawCrosshair(ctx, th, this.aim.x, this.aim.y, null, this.uiScale);                                   // your aim
+      ctx.restore();
+      let alive = 0, v = cb; while (v) { alive += v & 1; v >>= 1; }
+      R.drawHUD(ctx, th, { score: snap ? snap.sc : 0, wave: snap ? snap.w : 1, cities: alive, mult: 1, multFrac: 0, scale: this.uiScale });
+      this._renderToasts(ctx, R, th, now);
+    }
+    _drawGuestEnemy(ctx, th, x, y, sz, col) {
+      const TAU = Math.PI * 2; sz = Math.max(3, sz);
+      ctx.save();
+      if (th.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; }
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
+      ctx.beginPath(); ctx.moveTo(x, y - sz * 4); ctx.lineTo(x, y); ctx.stroke(); ctx.globalAlpha = 1;   // short trail
+      ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - sz); ctx.lineTo(x + sz, y); ctx.lineTo(x, y + sz); ctx.lineTo(x - sz, y); ctx.closePath(); ctx.fill();   // diamond head
+      ctx.restore();
     }
 
     _renderToasts(ctx, R, th, now) {

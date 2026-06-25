@@ -7,6 +7,7 @@
     tagline: "Aim. Intercept. Save the cities.",
     icon: "🛰️",
     accent: "#46f0c0",
+    multiplayer: true,
     create: function (context) { return new Arcade.Missile.Game(context); }
   });
 })(window.Arcade = window.Arcade || {});
