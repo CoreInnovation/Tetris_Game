@@ -18,8 +18,10 @@
   const PW = 420, PH = 680;                 // logical playfield
   const G = 1000, REST = 0.45, BALL_R = 9, MAXV = 1350;
   const BUMP_KICK = 360, SLING_KICK = 330, FLIP_BOOST = 600, FLIP_ANG = 27;
-  const PLUNGE_MIN = 1120, PLUNGE_MAX = 1320, DRAIN_Y = 656, MAX_BALLS = 5;
+  const PLUNGE_MIN = 1080, PLUNGE_MAX = 1240, DRAIN_Y = 656, MAX_BALLS = 5;
   const LOCK_NEED = 3;                       // locks to light multiball
+  const BALL_SAVE_MS = 8000;                 // grace window after a ball goes live — first drain is auto-saved (forgiving!)
+  const DAMP = 0.16;                         // gentle per-second velocity bleed: floaty "space" feel = way more controllable
 
   // ---- music (original) ----
   const PIN_ARP = [
@@ -137,8 +139,8 @@
 
       // ---- flippers: long bats that cover the bottom, ~26px center drain gap; centered on x≈190 ----
       this.flippers = [
-        { px: 116, py: 598, len: 70, thick: 8, rest: 0.50, active: -0.55, angle: 0.50, prev: 0.50, angVel: 0, pressed: false },
-        { px: 264, py: 598, len: 70, thick: 8, rest: Math.PI - 0.50, active: Math.PI + 0.55, angle: Math.PI - 0.50, prev: Math.PI - 0.50, angVel: 0, pressed: false }
+        { px: 116, py: 598, len: 72, thick: 8, rest: 0.44, active: -0.62, angle: 0.44, prev: 0.44, angVel: 0, pressed: false },
+        { px: 264, py: 598, len: 72, thick: 8, rest: Math.PI - 0.44, active: Math.PI + 0.62, angle: Math.PI - 0.44, prev: Math.PI - 0.44, angVel: 0, pressed: false }
       ];
 
       // ---- two drop-target banks ----
@@ -187,8 +189,9 @@
         { kind: "out", side: "R", x: 286, y: 580, w: 34, h: 64, lit: false, cool: 0 }
       ];
 
-      // ---- KICKBACK in the left outlane ----
+      // ---- KICKBACKs in BOTH outlanes (table is now symmetric & fair — left drains were saveable, right weren't) ----
       this.kickback = { x: 78, y: 644, charged: true, glow: 0 };
+      this.kickbackR = { x: 302, y: 644, charged: true, glow: 0 };
 
       this.plungerX = 384;
       // habitrail RAMP scripted path: enter top-left, loop over the top, drop into the right inlane
@@ -208,7 +211,8 @@
       this.standups.forEach(s => { s.lit = false; s.hit = 0; });
       this.warp.forEach(w => w.lit = false);
       this.lanes.forEach(l => { l.lit = false; l.cool = 0; });
-      this.kickback.charged = true;
+      this.kickback.charged = true; this.kickbackR.charged = true;
+      this.ballSaveT = 0;
       this.particles.clear();
       this.state = "playing"; this.paused = false;
       this._spawnLaunchBall();
@@ -266,6 +270,7 @@
       this.charging = false; this.plunge = 0;
       if (launched) {
         this.audio.play("plunger");
+        this.ballSaveT = BALL_SAVE_MS;   // grace window opens the moment the ball goes live
         // SKILL SHOT: light a random WARP lane; rolling over it before a flipper hit scores big
         this.skillLane = (Math.random() * this.warp.length) | 0; this.skillT = 4500;
         this._flash("SKILL SHOT: " + this.warp[this.skillLane].ch + " LANE");
@@ -318,6 +323,8 @@
       if (this.lock.glow > 0) this.lock.glow -= ds;
       if (this.rampEntry.glow > 0) this.rampEntry.glow -= ds;
       if (this.kickback.glow > 0) this.kickback.glow -= ds;
+      if (this.kickbackR.glow > 0) this.kickbackR.glow -= ds;
+      if (this.ballSaveT > 0 && this.balls.some(b => b.mode === "play")) this.ballSaveT -= dt;
       if (this.reactor.lit > 0) this.reactor.lit -= ds;
       if (this.magnet.active > 0) this.magnet.active -= dt;
       // spinner spin-down
@@ -362,12 +369,25 @@
         if (b.mode === "hold" || b.mode === "ramp") continue;
         if (b.y > DRAIN_Y) {
           if (this.dev) { b.y = DRAIN_Y - 4; b.vy = -Math.abs(b.vy) - 200; continue; }
+          // BALL SAVE: during the grace window, ANY drain is forgiven — boot it straight back up the middle
+          if (this.ballSaveT > 0) {
+            b.y = 596; b.x = Math.max(60, Math.min(360, b.x)); b.vy = -1040; b.vx = rand(-70, 70); b.mode = "play";
+            this.audio.play("plunger"); this._flash("BALL SAVED!"); this._burst(b.x, b.y, this.theme.palette.kick, 16); if (this.theme.effects.shake) this._shake(4);
+            continue;
+          }
           // left outlane kickback save
-          if (b.x > 56 && b.x < 100 && this.kickback.charged) {
+          if (b.x > 56 && b.x < 104 && this.kickback.charged) {
             this.kickback.charged = false; this.kickback.glow = 0.6; b.y = 600; b.vy = -1020; b.vx = rand(40, 120); b.mode = "play";
             this.audio.play("plunger"); this._flash("KICKBACK SAVE!"); this._burst(b.x, b.y, this.theme.palette.kick, 14); if (this.theme.effects.shake) this._shake(4);
             continue;
           }
+          // right outlane kickback save (mirror)
+          if (b.x > 276 && b.x < 324 && this.kickbackR.charged) {
+            this.kickbackR.charged = false; this.kickbackR.glow = 0.6; b.y = 600; b.vy = -1020; b.vx = rand(-120, -40); b.mode = "play";
+            this.audio.play("plunger"); this._flash("KICKBACK SAVE!"); this._burst(b.x, b.y, this.theme.palette.kick, 14); if (this.theme.effects.shake) this._shake(4);
+            continue;
+          }
+          this._lastDrainX = b.x;
           this.balls.splice(i, 1);
           this._burst(b.x, DRAIN_Y, this.theme.palette.danger, 10);
         }
@@ -427,6 +447,7 @@
           const mx = this.magnet.x - b.x, my = this.magnet.y - b.y, md = Math.hypot(mx, my);
           if (md < this.magnet.r && md > 2) { const pull = 900 * (1 - md / this.magnet.r); b.vx += (mx / md) * pull * dt; b.vy += (my / md) * pull * dt; }
         }
+        const damp = 1 - DAMP * dt; b.vx *= damp; b.vy *= damp;   // gentle floaty bleed — controllable "space" feel
         let sp = Math.hypot(b.vx, b.vy); if (sp > MAXV) { b.vx *= MAXV / sp; b.vy *= MAXV / sp; }
         b.x += b.vx * dt; b.y += b.vy * dt;
 
@@ -525,7 +546,7 @@
           if (d < 0.0001) { nx = 1; ny = 0; d = 1; }
           nx /= d; ny /= d; b.x = s.x + nx * (b.r + s.r); b.y = s.y + ny * (b.r + s.r);
           const vn = b.vx * nx + b.vy * ny; if (vn < 0) { b.vx -= 1.6 * vn * nx; b.vy -= 1.6 * vn * ny; }
-          if (!s.lit) { s.lit = true; if (this.standups.every(q => q.lit)) { this.kickback.charged = true; this.kickback.glow = 1; this.standups.forEach(q => q.lit = false); this._flash("KICKBACK RE-ARMED!"); this._score(1500); } }
+          if (!s.lit) { s.lit = true; if (this.standups.every(q => q.lit)) { this.kickback.charged = true; this.kickback.glow = 1; this.kickbackR.charged = true; this.kickbackR.glow = 1; this.standups.forEach(q => q.lit = false); this._flash("KICKBACKS RE-ARMED!"); this._score(1500); } }
           s.hit = 0.2; this._score(150); this.audio.play("bump"); this._burst(s.x, s.y, this.theme.palette.standupLit, 6);
         }
       }
@@ -670,6 +691,8 @@
       R.drawLock(ctx, th, this.lock, now);
       R.drawMagnet(ctx, th, this.magnet, now);
       R.drawKickback(ctx, th, this.kickback, now);
+      R.drawKickback(ctx, th, this.kickbackR, now);
+      if (this.ballSaveT > 0) R.drawBallSave(ctx, th, this.ballSaveT / BALL_SAVE_MS, now);
       for (const s of this.slings) R.drawSling(ctx, th, s, now);
       for (const bm of this.bumpers) R.drawBumper(ctx, th, bm);
       R.drawReactor(ctx, th, this.reactor, now);
