@@ -191,6 +191,7 @@
       this.hintPow = 0; this.hintStreak = 0; this.hintArsenal = 0;   // dock attention cues (ms remaining)
       this.newWeapon = null; this.newWeaponT = 0; this._bannerRect = null; this._bannerPop = 0;   // big center "NEW WEAPON" banner: id + ms window + clickable rect + click-pop anim
       this.bannerShards = []; this._bannerShatterT = 0;   // banner shatters into flying shards on click (after a brief pop)
+      this.meltPods = [];   // ungrabbed supply pods MELT AWAY at wave end (clearly lost/wasted, not collected)
       this.betweenWaves = false; this.waveBreakT = 0;
       this.pending = 0; this.spawnT = 0; this.spawnGap = 1200; this.enemySpeed = ENEMY_BASE;
       this.powerupT = rand(4000, 7000); this.ufoT = rand(11000, 17000);
@@ -327,6 +328,12 @@
           v: [{ x: cx - tcx, y: cy - tcy }, { x: a.x - tcx, y: a.y - tcy }, { x: b.x - tcx, y: b.y - tcy }],   // verts local to centroid
           vx: dx / d * spd + rand(-50, 50), vy: dy / d * spd - rand(30, 140), rot: 0, vrot: rand(-9, 9), life: life, max: life });
       }
+    }
+    // a lost supply pod SLUMPS into a melting puddle (sinks, flattens, drips, fades) — reads as wasted, not collected
+    _meltPod(pu) {
+      const R = 14 * (this.uiScale || 1), col = pu.color || "#ffd24a";
+      this.meltPods.push({ x: pu.x, y: pu.y, r: R, col: col, t: 0, life: 1100, weapon: pu.weapon, town: pu.town, kind: pu.kind, mult: pu.mult });
+      if (this.theme.effects.particles) this.particles.emit({ x: pu.x, y: pu.y, count: 8, colors: [col, "#3a2a10"], speedMin: 8, speedMax: 50, angleMin: 0.2, angleMax: Math.PI - 0.2, gravity: 420, drag: 0.4, sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.5, lifeMax: 1.1, glow: this.theme.effects.glow, shape: "circle" });
     }
     _unlockedIds() { return WEAPONS.filter(w => this.unlocked[w.id]).map(w => w.id); }
     _nextUnlocked() { const u = this._unlockedIds(); return u[(u.indexOf(this.weapon) + 1) % u.length]; }
@@ -868,6 +875,9 @@
           if (sh.life <= 0) this.bannerShards.splice(i, 1);
         }
       }
+      if (this.meltPods.length) {   // melting puddles fade out
+        for (let i = this.meltPods.length - 1; i >= 0; i--) { const mp = this.meltPods[i]; mp.t += dt; if (mp.t >= mp.life) this.meltPods.splice(i, 1); }
+      }
       for (let i = this.toasts.length - 1; i >= 0; i--) if (now - this.toasts[i].born > this.toasts[i].life) this.toasts.splice(i, 1);
 
       for (const w of WEAPONS) {
@@ -1191,10 +1201,9 @@
         const aliveCities = this.cities.filter(c => c.alive).length;
         const bonus = aliveCities * 120;
         if (bonus > 0) { this.score += bonus; this._toast("+" + bonus + " BONUS", true); }
-        if (this.powerups.length) {   // pending pods SHATTER (heartbreaking) instead of freezing in the sky — you snooze, you lose
-          const R = 14 * (this.uiScale || 1);
-          for (const pu of this.powerups) this._shatterBanner({ x: pu.x - R, y: pu.y - R * 0.6, w: R * 2, h: R * 1.35 }, pu.color || "#ffd24a");
-          this.audio.play("drain"); this._toast("SUPPLIES LOST — TOO SLOW!", true, "#ff7a7a");
+        if (this.powerups.length) {   // pending pods MELT AWAY (clearly lost & wasted — not collected) — you snooze, you lose
+          for (const pu of this.powerups) this._meltPod(pu);
+          this.audio.play("drain"); this._toast("SUPPLIES LOST — MELTED AWAY!", true, "#ff7a7a");
           this.powerups.length = 0;
         }
         this.betweenWaves = true; this.waveBreakT = 5000;
@@ -1223,6 +1232,7 @@
       for (const u of this.ufos) R.drawUfo(ctx, th, u, now);
       for (const it of this.interceptors) R.drawInterceptor(ctx, th, it);
       for (const pu of this.powerups) R.drawDrop(ctx, th, pu, now, this.uiScale);   // falling supply pods (shoot to earn)
+      for (const mp of this.meltPods) R.drawMeltPod(ctx, th, mp);                    // lost pods melting into puddles
       for (const ex of this.explosions) R.drawExplosion(ctx, th, ex);
       for (const f of this.fires) R.drawFire(ctx, th, f, now);
       for (const gb of this.napGlobs) R.drawEmber(ctx, th, gb);
