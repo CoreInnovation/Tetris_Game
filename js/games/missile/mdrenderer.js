@@ -573,6 +573,27 @@
       ctx.restore();
     }
 
+    // a LOST pod melting into a puddle: it slumps (sinks + flattens), drips, and fades — clearly wasted
+    drawMeltPod(ctx, theme, mp) {
+      const p = Math.max(0, Math.min(1, mp.t / mp.life)), col = mp.col || "#ffd24a", R = mp.r;
+      const a = (1 - p) * 0.9;
+      if (a <= 0.02) return;
+      const rx = R * (1 + p * 0.7), ry = R * (1 - p * 0.85), cyY = mp.y + R * p * 0.9;   // widen, flatten, sink
+      ctx.save(); ctx.globalAlpha = a;
+      if (theme.effects.glow) { ctx.shadowBlur = 8 * (1 - p); ctx.shadowColor = col; }
+      // body sagging into a puddle
+      ctx.fillStyle = rgba(col, 0.85); ctx.beginPath(); ctx.ellipse(mp.x, cyY, rx, Math.max(1, ry), 0, 0, Math.PI * 2); ctx.fill();
+      // drips sliding down
+      ctx.strokeStyle = rgba(col, 0.7); ctx.lineWidth = Math.max(1.5, R * 0.18); ctx.lineCap = "round";
+      const drips = 3;
+      for (let i = 0; i < drips; i++) {
+        const dx = mp.x + (i - (drips - 1) / 2) * R * 0.55, len = R * (0.3 + p * 1.6) * (0.6 + 0.4 * ((i * 7 % 5) / 5));
+        ctx.beginPath(); ctx.moveTo(dx, cyY); ctx.lineTo(dx, cyY + len); ctx.stroke();
+        ctx.fillStyle = rgba(col, 0.7); ctx.beginPath(); ctx.arc(dx, cyY + len, ctx.lineWidth * 0.7, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // a SUPPLY POD falling from the sky on a little chute — shoot it to earn it
     drawDrop(ctx, theme, d, now, scale) {
       const col = d.color || "#ffd24a", x = d.x, y = d.y, R = 14 * (scale || 1);
