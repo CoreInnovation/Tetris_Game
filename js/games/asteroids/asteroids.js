@@ -77,8 +77,9 @@
       this.tapFire = ctx.storage.get("asteroids:tapfire", true);       // quick-tap in the stick zone fires (one-thumb play)
       const sb = ctx.storage.get("asteroids:stick", null);
       this.stickBase = sb ? { x: sb.x, y: sb.y, set: true } : { x: 0, y: 0, set: false };
-      this.stick = { active: false, pending: false, reposition: false, id: null, baseX: 0, baseY: 0, kx: 0, ky: 0, dx: 0, dy: 0, mag: 0, sx: 0, sy: 0, t0: 0 };
+      this.stick = { active: false, pending: false, reposition: false, id: null, baseX: 0, baseY: 0, kx: 0, ky: 0, dx: 0, dy: 0, mag: 0, sx: 0, sy: 0, t0: 0, forceFire: false };
       this.firing = false; this.fireId = null; this._fireReq = false;
+      this._forceSeen = false;   // becomes true once we observe graded Touch.force (0<f<1) — gates pressure-to-fire so non-supporting phones never false-fire
       this.dev = false;
       this._unsub = []; this.paused = false; this.state = "playing"; this._now = 0;
       this._w = 800; this._h = 600; this._cssW = 800; this._cssH = 600; this.zoom = 1;
@@ -104,7 +105,7 @@
     }
 
     // drop any held thumbstick/fire so it can't "stick on" across pause / game-over / restart
-    _clearTouchState() { this.stick.active = false; this.stick.pending = false; this.stick.reposition = false; this.stick.id = null; this.stick.mag = 0; this.firing = false; this.fireId = null; this._fireReq = false; }
+    _clearTouchState() { this.stick.active = false; this.stick.pending = false; this.stick.reposition = false; this.stick.id = null; this.stick.mag = 0; this.stick.forceFire = false; this.firing = false; this.fireId = null; this._fireReq = false; }
     _staticBase() { return (this.stickBase && this.stickBase.set) ? this.stickBase : { x: this._cssW * 0.22, y: this._cssH * 0.74 }; }
     _onStickHandle(p) { const b = this._staticBase(); return Math.hypot(p.x - b.x, p.y - b.y) < 26; }
 
@@ -112,7 +113,7 @@
       const self = this, SG = A.SONGS;
       return {
         control: {
-          profiles: [{ id: "float", name: "Floating stick" }, { id: "static", name: "Static stick (drag ⊕ to place)" }],
+          profiles: [{ id: "float", name: "Anchored stick (press to place)" }, { id: "static", name: "Static stick (drag ⊕ to place)" }],
           profile: this.ctrlProfile,
           setProfile: (id) => { self.ctrlProfile = id; self.shell.storage.set("asteroids:ctrl", id); self._clearTouchState(); },
           toggles: [{ id: "tap", name: "Tap to fire (one thumb)", on: this.tapFire, set: (v) => { self.tapFire = v; self.shell.storage.set("asteroids:tapfire", v); } }]
@@ -161,9 +162,10 @@
       if (this.shell.isTouch) this._bindTouch();
     }
 
-    // Thumbstick (left) + fire (right). FLOAT profile: the base spawns where you touch and follows your finger.
-    // STATIC profile: the base is pinned (drag the ⊕ to move it). TAP-FIRE toggle: a quick tap in the stick zone
-    // fires; holding & sliding steers — so one thumb can both fly and shoot. The fire button always works too.
+    // Thumbstick (left) + fire (right). FLOAT profile: the base ANCHORS where you first press and stays put for
+    // that whole hold (no recentering) — clamp the throw at STICK_MAX. STATIC profile: the base is pinned (drag the
+    // ⊕ to move it). One thumb does everything: a quick TAP fires, and on pressure-capable phones a firm PRESS fires
+    // while you keep steering. The dedicated fire button (right side) always works too.
     _bindTouch() {
       const canvas = this.shell.canvas, STICK_MAX = 70, TAP_MOVE = 16, TAP_MS = 200;
       const toLocal = (t) => { const r = canvas.getBoundingClientRect(); return { x: (t.clientX - r.left) * (this._cssW / r.width), y: (t.clientY - r.top) * (this._cssH / r.height) }; };
@@ -176,7 +178,7 @@
           if (p.x > this._cssW * 0.6) { if (this.fireId == null) { this.firing = true; this.fireId = t.identifier; } continue; }
           if (s.active || s.pending || s.reposition || s.id != null) continue;   // single stick finger
           if (this.ctrlProfile === "static" && this._onStickHandle(p)) { s.reposition = true; s.id = t.identifier; continue; }   // grab ⊕ to move it
-          s.pending = true; s.id = t.identifier; s.sx = p.x; s.sy = p.y; s.t0 = this._now;
+          s.pending = true; s.id = t.identifier; s.sx = p.x; s.sy = p.y; s.t0 = this._now; s.forceFire = false;
           const base = (this.ctrlProfile === "static") ? this._staticBase() : { x: p.x, y: p.y };
           s.baseX = base.x; s.baseY = base.y; s.kx = p.x; s.ky = p.y; s.dx = 0; s.dy = 0; s.mag = 0;
         }
@@ -187,13 +189,20 @@
         for (const t of e.changedTouches) {
           if (t.identifier !== s.id) continue;
           const p = toLocal(t);
+          // PRESSURE-TO-FIRE (phones with graded Touch.force only): a firm press shoots while you steer. Self-calibrating —
+          // we only trust force once we've seen a value strictly between 0 and 1, so a device reporting a constant 0 (no
+          // support) or a constant 1 never trips it. iOS emits touchmove on force change, so this updates even while still.
+          const f = (typeof t.force === "number") ? t.force : 0;
+          if (f > 0.02 && f < 0.98) this._forceSeen = true;
+          s.forceFire = this._forceSeen && f >= 0.55;
           if (s.reposition) { this.stickBase = { x: p.x, y: p.y, set: true }; continue; }
           if (s.pending) {
             if (Math.hypot(p.x - s.sx, p.y - s.sy) > TAP_MOVE || (this._now - s.t0) > TAP_MS) { s.pending = false; s.active = true; }
             else continue;   // still might be a quick tap
           }
+          // base STAYS anchored where the press began — clamp the throw at STICK_MAX, never recenter to follow the finger
           let vx = p.x - s.baseX, vy = p.y - s.baseY, d = Math.hypot(vx, vy);
-          if (d > STICK_MAX) { const nx = vx / d, ny = vy / d; if (this.ctrlProfile === "float") { s.baseX = p.x - nx * STICK_MAX; s.baseY = p.y - ny * STICK_MAX; } vx = nx * STICK_MAX; vy = ny * STICK_MAX; d = STICK_MAX; }
+          if (d > STICK_MAX) { const nx = vx / d, ny = vy / d; vx = nx * STICK_MAX; vy = ny * STICK_MAX; d = STICK_MAX; }
           s.kx = s.baseX + vx; s.ky = s.baseY + vy;
           if (d > 0.001) { s.dx = vx / d; s.dy = vy / d; } else { s.dx = 0; s.dy = 0; }
           s.mag = Math.min(1, d / STICK_MAX);
@@ -204,7 +213,7 @@
           if (t.identifier === s.id) {
             if (s.reposition) this.shell.storage.set("asteroids:stick", { x: this._staticBase().x, y: this._staticBase().y });
             else if (s.pending && this.tapFire) this._fireReq = true;   // quick tap -> fire
-            s.active = false; s.pending = false; s.reposition = false; s.id = null; s.mag = 0;
+            s.active = false; s.pending = false; s.reposition = false; s.id = null; s.mag = 0; s.forceFire = false;
           }
           if (t.identifier === this.fireId) { this.firing = false; this.fireId = null; }
         }
@@ -385,7 +394,7 @@
         ship.vx *= (1 - DRAG * s); ship.vy *= (1 - DRAG * s);
         ship.x += ship.vx * s; ship.y += ship.vy * s; this._wrap(ship);
         this.fireCd -= dt;
-        if ((I.isDown("Space") || this.firing || this._fireReq) && this.fireCd <= 0) { this._fire(); this.fireCd = WMAP[this.weapon].cd; }
+        if ((I.isDown("Space") || this.firing || this._fireReq || this.stick.forceFire) && this.fireCd <= 0) { this._fire(); this.fireCd = WMAP[this.weapon].cd; }
         this._fireReq = false;
       } else { this.respawnT -= dt; if (this.respawnT <= 0) this._respawnShip(); }
 
