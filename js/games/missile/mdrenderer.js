@@ -407,87 +407,73 @@
       ctx.fillStyle = g; ctx.fillRect(0, top, w, h);
       ctx.strokeStyle = rgba(p.accent, 0.7); ctx.lineWidth = 2; if (theme.effects.glow) { ctx.shadowBlur = 10; ctx.shadowColor = p.accent; }
       ctx.beginPath(); ctx.moveTo(0, top + 1); ctx.lineTo(w, top + 1); ctx.stroke(); ctx.shadowBlur = 0;
-      // captions (each sits just above its row)
-      ctx.textBaseline = "alphabetic"; ctx.fillStyle = rgba(p.textDim, 0.85); ctx.font = "700 " + fs(9) + "px " + theme.fonts.ui; ctx.textAlign = "left";
-      const cap = (txt, slot) => { if (slot) ctx.fillText(txt, slot.x + 1, slot.y - fs(4)); };
-      if (d.weapons.length) cap("ARSENAL", d.weapons[0].rect);
-      cap("MILITIA", d.militiaSlots && d.militiaSlots[0]);
-      cap("KILLSTREAKS", d.streakSlots[0]);
+      // captions: NAME + a clear action hint so it's crystal-clear what each section does
+      const clamp01 = (v) => Math.max(0, Math.min(1, v));
+      ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+      const cap = (name, hintTxt, hintCol, slot) => {
+        if (!slot) return;
+        const x = Math.max(fs(6), slot.x), y = slot.y - fs(5);
+        ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.fillStyle = rgba(p.textDim, 0.95);
+        ctx.fillText(name, x, y);
+        if (hintTxt) { const tw = ctx.measureText(name).width; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.fillStyle = rgba(hintCol, 0.9); ctx.fillText("  " + hintTxt, x + tw, y); }
+      };
+      if (d.weapons.length) cap("ARSENAL", "CLICK / 1-9 TO SWITCH", p.accent, d.weapons[0].rect);
+      cap("MILITIA", "AUTO-DEFENSE", p.textDim, d.militiaSlots && d.militiaSlots[0]);
+      cap("KILLSTREAKS", "CLICK / [R]", "#ffe14d", d.streakSlots[0]);
 
-      // ---- ARSENAL ----
+      // ---- ARSENAL (click a weapon to switch; the SELECTED one is highlighted) ----
       for (const c of d.weapons) {
-        const r = c.rect, col = c.color || p.interceptor;
-        const borderCol = c.cooling ? p.enemy : (c.active ? p.accent : rgba(p.textDim, 0.5));
-        this._dockTile(ctx, theme, r, borderCol, { dim: c.locked, lw: (c.active || c.cooling) ? 2.2 : 1.2,
-          glow: c.active ? 10 : 0, tint: c.cooling ? "rgba(255,72,72,0.16)" : (c.active ? rgba(p.accent, 0.08) : null) });
+        const r = c.rect, col = c.color || p.interceptor, iconS = Math.round(r.h * 0.40);
+        const borderCol = c.cooling ? p.enemy : (c.active ? p.accent : rgba(p.textDim, 0.55));
+        this._dockTile(ctx, theme, r, borderCol, { dim: c.locked, lw: (c.active || c.cooling) ? 2.4 : 1.3,
+          glow: c.active ? 12 : 0, tint: c.cooling ? "rgba(255,72,72,0.16)" : (c.active ? rgba(p.accent, 0.10) : null) });
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        if (c.locked) { ctx.fillStyle = p.textDim; ctx.font = "700 " + fs(16) + "px " + theme.fonts.ui; ctx.fillText("?", r.x + r.w / 2, r.y + r.h / 2); continue; }
-        this.drawWeaponIcon(ctx, c.id, r.x + r.w / 2, r.y + r.h * 0.46, fs(17), col);
+        if (c.locked) { ctx.fillStyle = p.textDim; ctx.font = "700 " + Math.round(r.h * 0.4) + "px " + theme.fonts.ui; ctx.fillText("?", r.x + r.w / 2, r.y + r.h / 2); continue; }
+        if (c.active) { ctx.fillStyle = p.accent; if (theme.effects.glow) { ctx.shadowBlur = 6; ctx.shadowColor = p.accent; } ctx.fillRect(r.x + fs(6), r.y + fs(4), r.w - fs(12), Math.max(2, fs(2))); ctx.shadowBlur = 0; }   // SELECTED bar
+        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "800 " + fs(11) + "px " + theme.fonts.ui; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h * 0.40); }
+        else this.drawWeaponIcon(ctx, c.id, r.x + r.w / 2, r.y + r.h * 0.40, iconS, col);
         ctx.fillStyle = c.active ? p.text : p.textDim; ctx.font = "700 " + fs(9) + "px " + theme.fonts.ui;
-        ctx.fillText(c.short, r.x + r.w / 2, r.y + r.h - fs(15));
-        if (c.keyNum <= 9) { ctx.fillStyle = rgba(p.textDim, 0.8); ctx.font = "600 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillText(String(c.keyNum), r.x + r.w - fs(5), r.y + fs(4)); }   // only 1-9 have a digit hotkey
-        const bw = r.w - fs(12), bx = r.x + fs(6), byb = r.y + r.h - fs(8), bh3 = Math.max(2, fs(3));
+        ctx.fillText(c.short, r.x + r.w / 2, r.y + r.h * 0.70);
+        if (c.keyNum <= 9) { ctx.fillStyle = rgba(c.active ? p.accent : p.textDim, 0.85); ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillText(String(c.keyNum), r.x + r.w - fs(5), r.y + fs(4)); }
+        const bw = r.w - fs(12), bx = r.x + fs(6), bh3 = Math.max(2, fs(3)), byb = r.y + r.h - bh3 - fs(3);   // heat / cooldown bar at the very bottom
         ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb, bw, bh3);
-        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.cdFrac)), bh3); }
-        else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * Math.max(0, Math.min(1, c.heatFrac)), bh3); }
-        if (c.active && !c.cooling) { const rh = Math.max(2, fs(2)); ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb - rh - 2, bw, rh); ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7); ctx.fillRect(bx, byb - rh - 2, bw * Math.max(0, Math.min(1, c.reloadFrac)), rh); }
-        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.font = "800 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("COOL", r.x + r.w / 2, r.y + r.h / 2 + fs(13)); }
+        if (c.cooling) { ctx.fillStyle = p.enemy; ctx.fillRect(bx, byb, bw * clamp01(c.cdFrac), bh3); }
+        else { ctx.fillStyle = c.heatFrac > 0.7 ? "#ffb43a" : "#5ad1ff"; ctx.fillRect(bx, byb, bw * clamp01(c.heatFrac), bh3); }
+        if (c.active && !c.cooling) { const rh = Math.max(2, fs(2)); ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(bx, byb - rh - 2, bw, rh); ctx.fillStyle = c.reloadFrac >= 1 ? p.accent : rgba(p.accent, 0.7); ctx.fillRect(bx, byb - rh - 2, bw * clamp01(c.reloadFrac), rh); }
       }
 
-      // ---- MILITIA (townsfolk upgrades — display only; person-marked) ----
+      // ---- MILITIA (townsfolk auto-defense — display only) ----
       if (d.militiaSlots) {
         for (const r of d.militiaSlots) { ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore(); }
         for (const mu of (d.militia || [])) {
           const r = mu.rect, col = mu.color;
-          this._dockTile(ctx, theme, r, col, { lw: 1.6, glow: 7, tint: rgba(col, 0.14) });
-          this.drawTownIcon(ctx, mu.id, r.x + r.w / 2, r.y + r.h * 0.42, fs(16), col);
-          this._personBadge(ctx, r.x + r.w - fs(9), r.y + fs(9), fs(8), col);
-          ctx.fillStyle = col; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(mu.short, r.x + r.w / 2, r.y + r.h - fs(12));
-          if (mu.lvl > 1) {   // enhancer level pips
-            const pips = Math.min(4, mu.lvl), pw = fs(5), tot = pips * pw + (pips - 1) * 2, bx = r.x + (r.w - tot) / 2, by = r.y + r.h - fs(5);
-            for (let k = 0; k < pips; k++) { ctx.fillStyle = col; ctx.fillRect(bx + k * (pw + 2), by, pw, Math.max(2, fs(2))); }
-          }
+          this._dockTile(ctx, theme, r, col, { lw: 1.6, glow: 6, tint: rgba(col, 0.14) });
+          this.drawTownIcon(ctx, mu.id, r.x + r.w / 2, r.y + r.h * 0.40, Math.round(r.h * 0.40), col);
+          ctx.fillStyle = col; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(mu.short, r.x + r.w / 2, r.y + r.h * 0.74);
+          if (mu.lvl > 1) { ctx.fillStyle = col; ctx.font = "800 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillText("L" + mu.lvl, r.x + r.w - fs(4), r.y + fs(3)); }   // enhancer level
         }
       }
 
-      // ---- KILLSTREAKS (empty slots + meter on the next one, then earned streaks) ----
+      // ---- KILLSTREAKS (empty slots + charge meter, then earned streaks that PULSE = ready to use) ----
       for (let i = 0; i < d.streakSlots.length; i++) {
         const r = d.streakSlots[i]; ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = rgba(p.textDim, 0.3); ctx.lineWidth = 1; rr(ctx, r.x, r.y, r.w, r.h, 7); ctx.stroke(); ctx.restore();
         if (i === d.nextSlot && d.streaks.length < d.streakSlots.length) {   // charge meter fills the next empty slot
-          const m = Math.max(0, Math.min(1, d.meter)); ctx.fillStyle = rgba(p.accent, 0.16); rr(ctx, r.x, r.y + r.h * (1 - m), r.w, r.h * m, 7); ctx.fill();
-          ctx.fillStyle = rgba(p.accent, 0.7); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.fillText(Math.round(m * 100) + "%", r.x + r.w / 2, r.y + r.h / 2);
+          const m = clamp01(d.meter); ctx.fillStyle = rgba(p.accent, 0.16); rr(ctx, r.x, r.y + r.h * (1 - m), r.w, r.h * m, 7); ctx.fill();
+          ctx.fillStyle = rgba(p.accent, 0.75); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.fillText(Math.round(m * 100) + "%", r.x + r.w / 2, r.y + r.h / 2);
         }
       }
       let anyPicked = false;
-      // ready killstreaks PULSE strongly + carry a bouncing arrow — they SHOULD be pressed (R / tap)
-      const kpulse = 0.5 + 0.5 * Math.sin(now / 260);
+      const kpulse = 0.5 + 0.5 * Math.sin(now / 260);   // ready killstreaks breathe so it's obvious they can be fired
       for (let si = 0; si < d.streaks.length; si++) {
         const sk = d.streaks[si], r = sk.rect, picked = sk.picked; if (picked) anyPicked = true;
-        const glow = picked ? 20 : (10 + 14 * kpulse), lw = picked ? 3 : (2 + 1.4 * kpulse);
-        this._dockTile(ctx, theme, r, picked ? "#ffffff" : sk.color, { lw: lw, glow: glow, tint: rgba(sk.color, picked ? 0.34 : (0.16 + 0.16 * kpulse)) });
-        this.drawStreakIcon(ctx, sk.id, r.x + r.w / 2, r.y + r.h * 0.48, fs(20), picked ? "#ffffff" : sk.color);
+        const glow = picked ? 20 : (9 + 12 * kpulse), lw = picked ? 3 : (2 + 1.2 * kpulse);
+        this._dockTile(ctx, theme, r, picked ? "#ffffff" : sk.color, { lw: lw, glow: glow, tint: rgba(sk.color, picked ? 0.34 : (0.15 + 0.14 * kpulse)) });
+        this.drawStreakIcon(ctx, sk.id, r.x + r.w / 2, r.y + r.h * 0.40, Math.round(r.h * 0.46), picked ? "#ffffff" : sk.color);
         ctx.fillStyle = picked ? "#fff" : sk.color; ctx.font = "700 " + fs(8) + "px " + theme.fonts.ui; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(sk.name.split(" ")[0], r.x + r.w / 2, r.y + r.h - fs(13));
-        if (picked) { ctx.fillStyle = "#fff"; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.fillText("▲", r.x + r.w / 2, r.y - fs(7)); }
+        ctx.fillText(sk.name.split(" ")[0], r.x + r.w / 2, r.y + r.h * 0.78);
       }
       if (anyPicked) { ctx.fillStyle = p.text; ctx.font = "800 " + fs(9) + "px " + theme.fonts.ui; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("RELEASE TO FIRE", w - fs(10), top + fs(13)); }
-
-      // ---- ONE clear indicator PER SECTION when it has something to act on (consistent, not per-tile) ----
-      const hint = d.hint || {};
-      const sectionArrow = (rects, label, alpha) => {
-        if (!rects.length || alpha <= 0) return;
-        const a0 = rects[0], a1 = rects[rects.length - 1], cx = (a0.x + a1.x + a1.w) / 2;
-        const bounce = Math.abs(Math.sin(now / 220)) * fs(6), ay = a0.y - fs(7) - bounce;
-        ctx.save(); ctx.globalAlpha = Math.min(1, alpha); ctx.fillStyle = p.accent;
-        if (theme.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = p.accent; }
-        ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.font = "800 " + fs(8) + "px " + theme.fonts.ui;
-        ctx.fillText(label, cx, ay - fs(8));
-        const aw = fs(7); ctx.beginPath(); ctx.moveTo(cx - aw, ay - fs(8)); ctx.lineTo(cx + aw, ay - fs(8)); ctx.lineTo(cx, ay); ctx.closePath(); ctx.fill();
-        ctx.restore();
-      };
-      const kpul = 0.5 + 0.5 * Math.sin(now / 300);
-      if (d.streaks.length && !anyPicked) sectionArrow(d.streaks.map(s => s.rect), "USE · R", 0.5 + 0.5 * kpul);   // killstreaks are clickable / press R
-      if (hint.arsenal > 0 && d.weapons.length) sectionArrow(d.weapons.map(c => c.rect), "SELECT", Math.min(1, hint.arsenal / 700));   // a new weapon just landed
       ctx.restore();
     }
 
