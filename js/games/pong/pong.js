@@ -34,13 +34,23 @@
       this._w = 800; this._h = 600;
       this.moveDir = 0; this._ptrActive = false; this._ptrMode = "mouse"; this.targetX = 0; this._vx = 0;
       this.touchSens = clamp(ctx.storage.get("pong:sens", SENS_DEFAULT), 0.5, 3.5);   // mobile drag sensitivity (punchier default)
-      // ---- online multiplayer (Cloudflare-backed; offline vs-CPU is the default) ----
-      this.mode = "cpu";          // "cpu" | "online"
-      this.net = null; this.netRole = null; this.netPhase = null;   // "lobby"|"waiting"|"play"|"ended"
-      this.netCode = ""; this.peerName = ""; this.myName = ctx.storage.get("pong:name", "") || ("P" + (1000 + (Math.random() * 9000 | 0)));
-      this.sH = 0; this.sG = 0; this._netSendT = 0; this._guestX = null; this._uiBtns = [];
+      // ---- online multiplayer via the reusable Arcade.Lobby (offline vs-CPU is the default) ----
+      this.myName = ctx.storage.get("pong:name", "") || ("P" + (1000 + (Math.random() * 9000 | 0)));
+      this.sH = 0; this.sG = 0; this._guestX = null;
+      const self = this;
+      this.lobby = new Arcade.Lobby({
+        canvas: ctx.canvas, audio: ctx.audio,
+        w: () => this._w, h: () => this._h, theme: () => this.theme, name: () => this.myName,
+        gameId: "pong", title: "MULTIPLAYER", rules: "First to 7 wins",
+        winLabels: { host: "HOST WINS", guest: "CHALLENGER WINS" },
+        onStart: (info) => self._startOnlineMatch(info),
+        onMessage: (m, role) => self._onNetMessage(m, role),
+        onEnd: () => {},                                   // lobby draws the result; sim is frozen via blocking()
+        onLeave: () => { self._reset(); }
+      });
       this._bindInput();
     }
+    _online() { return !!(this.lobby && this.lobby.phase === "play"); }   // true only during an active online match
 
     start() { this._reset(); }
     restart() { this._reset(); }
@@ -62,7 +72,7 @@
       if (this._mm) c.removeEventListener("mousemove", this._mm);
       if (this._md) c.removeEventListener("mousedown", this._md);
       if (this._tstart) { c.removeEventListener("touchstart", this._tstart); c.removeEventListener("touchmove", this._tmove); c.removeEventListener("touchend", this._tend); c.removeEventListener("touchcancel", this._tend); }
-      if (this.net) { try { this.net.send({ t: "bye" }); } catch (e) {} this.net.close(); this.net = null; }
+      if (this.lobby) this.lobby.destroy();
       this._unsub.forEach(fn => fn()); this._unsub.length = 0;
     }
 
@@ -124,7 +134,8 @@
     _bindInput() {
       const input = this.shell.input, canvas = this.shell.canvas;
       this._unsub.push(input.onDown((code, e, repeat) => {
-        if (this.paused || this.state !== "playing" || repeat) return;
+        if (this.lobby.keydown(e)) return;        // typing a room code into the on-canvas keypad
+        if (this.paused || this.state !== "playing" || repeat || this.lobby.blocking()) return;
         if (code === "ArrowLeft") { this.moveDir = -1; this._ptrActive = false; }
         else if (code === "ArrowRight") { this.moveDir = 1; this._ptrActive = false; }
       }));
@@ -133,17 +144,15 @@
         else if (code === "ArrowRight" && this.moveDir === 1) this._recompute();
       }));
       const courtX = (clientX) => { const r = canvas.getBoundingClientRect(); return (clientX - r.left) * (this._w / r.width); };
-      const localPt = (clientX, clientY) => { const r = canvas.getBoundingClientRect(); return { x: (clientX - r.left) * (this._w / r.width), y: (clientY - r.top) * (this._h / r.height) }; };
-      this._uiHit = (clientX, clientY) => { const p = localPt(clientX, clientY); for (const b of this._uiBtns) { if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { this.audio.unlock && this.audio.unlock(); b.fn(); return true; } } return false; };
-      // UI buttons (online lobby etc.) intercept clicks/taps before paddle control
-      this._md = (e) => { this._uiHit(e.clientX, e.clientY); };
+      // lobby chrome (PLAY ONLINE pill, lobby/keypad/result buttons) intercepts taps BEFORE paddle control
+      this._md = (e) => { this.lobby.pointerDown(e.clientX, e.clientY); };
       canvas.addEventListener("mousedown", this._md);
       // MOUSE: absolute (precise on desktop)
-      this._mm = (e) => { if (this.paused || this.state !== "playing" || this.netPhase === "lobby" || this.netPhase === "waiting") return; this.targetX = courtX(e.clientX); this._ptrActive = true; this._ptrMode = "mouse"; };
+      this._mm = (e) => { if (this.paused || this.state !== "playing" || this.lobby.blocking()) return; this.targetX = courtX(e.clientX); this._ptrActive = true; this._ptrMode = "mouse"; };
       // TOUCH: RELATIVE drag — first touch anchors at the paddle's current spot, then it tracks the
       // finger's *movement* (× sensitivity). No jump-to-finger; drag from anywhere on screen.
-      this._tstart = (e) => { const t = e.touches && e.touches[0]; if (!t) return; if (this._uiHit(t.clientX, t.clientY)) { e.preventDefault(); return; } if (this.paused || this.state !== "playing" || this.netPhase === "lobby" || this.netPhase === "waiting") return; e.preventDefault(); this._dragX0 = courtX(t.clientX); this._padX0 = this._ctrlPaddle().x; this.targetX = this._padX0; this._ptrActive = true; this._ptrMode = "touch"; };
-      this._tmove = (e) => { if (this.paused || this.state !== "playing" || this.netPhase === "lobby" || this.netPhase === "waiting") return; const t = e.touches && e.touches[0]; if (!t) return; e.preventDefault(); if (this._dragX0 == null) { this._dragX0 = courtX(t.clientX); this._padX0 = this._ctrlPaddle().x; } this.targetX = this._padX0 + (courtX(t.clientX) - this._dragX0) * this.touchSens; this._ptrMode = "touch"; this._ptrActive = true; };
+      this._tstart = (e) => { const t = e.touches && e.touches[0]; if (!t) return; if (this.lobby.pointerDown(t.clientX, t.clientY)) { e.preventDefault(); return; } if (this.paused || this.state !== "playing" || this.lobby.blocking()) return; e.preventDefault(); this._dragX0 = courtX(t.clientX); this._padX0 = this._ctrlPaddle().x; this.targetX = this._padX0; this._ptrActive = true; this._ptrMode = "touch"; };
+      this._tmove = (e) => { if (this.paused || this.state !== "playing" || this.lobby.blocking()) return; const t = e.touches && e.touches[0]; if (!t) return; e.preventDefault(); if (this._dragX0 == null) { this._dragX0 = courtX(t.clientX); this._padX0 = this._ctrlPaddle().x; } this.targetX = this._padX0 + (courtX(t.clientX) - this._dragX0) * this.touchSens; this._ptrMode = "touch"; this._ptrActive = true; };
       this._tend = () => { this._dragX0 = null; this._ptrActive = false; };   // release → paddle keeps its flick momentum (glides in update)
       canvas.addEventListener("mousemove", this._mm);
       canvas.addEventListener("touchstart", this._tstart, { passive: false });
@@ -158,82 +167,37 @@
       else this.moveDir = 0;
     }
 
-    // ================= ONLINE MULTIPLAYER =================
+    // ================= ONLINE MULTIPLAYER (via Arcade.Lobby) =================
+    // role + connection live in this.lobby; the game keeps only the host/guest SIM.
+    _isHost() { return this.lobby.isHost(); }
+    _isGuest() { return this.lobby.isGuest(); }
     // The paddle THIS device controls: guest drives the top paddle, host/CPU-mode drives the bottom.
-    _ctrlPaddle() { return (this.mode === "online" && this.netRole === "guest") ? this.cpuP : this.player; }
-    _isHost() { return this.mode === "online" && this.netRole === "host"; }
-    _isGuest() { return this.mode === "online" && this.netRole === "guest"; }
+    _ctrlPaddle() { return (this._online() && this._isGuest()) ? this.cpuP : this.player; }
 
-    _openLobby() { this.netPhase = "lobby"; this._toast("MULTIPLAYER", this.theme.palette.accent, true); }
-    _leaveOnline() {
-      if (this.net) { try { this.net.send({ t: "bye" }); } catch (e) {} this.net.close(); this.net = null; }
-      this.mode = "cpu"; this.netRole = null; this.netPhase = null; this.netCode = ""; this.peerName = "";
-      this.state = "playing"; this._reset();
-    }
-    _createGame() {
-      if (!Arcade.Net || !Arcade.Net.configured()) { this._toast("SERVER NOT SET UP", this.theme.palette.danger, true); return; }
-      this.netCode = Arcade.Net.makeCode(); this._netConnect(this.netCode);
-    }
-    _joinGame() {
-      if (!Arcade.Net || !Arcade.Net.configured()) { this._toast("SERVER NOT SET UP", this.theme.palette.danger, true); return; }
-      let code = ""; try { code = (window.prompt("Enter room code:") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6); } catch (e) {}
-      if (code.length < 4) { this._toast("BAD CODE", this.theme.palette.danger); return; }
-      this.netCode = code; this._netConnect(code);
-    }
-    _netConnect(code) {
-      this.mode = "online"; this.netPhase = "waiting"; this.netRole = null; this.peerName = "";
-      const self = this;
-      this.net = Arcade.Net.connect({
-        code: code, name: this.myName,
-        onRole: (m) => { self.netRole = m.role; },
-        onPeer: (m) => {
-          if (m.event === "joined") { self.peerName = m.name || "Opponent"; if (self.netPhase !== "play") self._startOnlineMatch(); }
-          else if (m.event === "left") { self.netPhase = "ended"; self._netWinner = "Opponent left"; }
-        },
-        onFull: () => { self._toast("ROOM FULL", self.theme.palette.danger, true); self._leaveOnline(); },
-        onMessage: (m) => self._onNetMessage(m),
-        onClose: () => { if (self.mode === "online" && self.netPhase !== "ended") { self.netPhase = "ended"; self._netWinner = "Disconnected"; } },
-        onError: () => { self._toast("CONNECTION ERROR", self.theme.palette.danger, true); }
-      });
-    }
-    _onNetMessage(m) {
-      if (m.t === "input") { if (this._isHost()) this._guestX = m.x; }
-      else if (m.t === "state") { if (this._isGuest()) this._applyState(m); }
-      else if (m.t === "rematch") { if (this._isHost()) this._startOnlineMatch(); }
-      else if (m.t === "bye") { this.netPhase = "ended"; this._netWinner = "Opponent left"; }
-    }
-    _startOnlineMatch() {
-      this.netPhase = "play"; this.state = "playing";
-      this.sH = 0; this.sG = 0; this._netWinner = null; this._guestX = null;
+    // lobby fires this on both sides when a match (re)starts
+    _startOnlineMatch(info) {
+      this.sH = 0; this.sG = 0; this._guestX = null; this._vx = 0;
       this._layout();
       const c = this.court; this.player.x = c.x + c.w / 2; this.cpuP.x = c.x + c.w / 2;
       this.ball = { x: c.x + c.w / 2, y: c.y + c.h / 2, vx: 0, vy: 0, r: this.br };
-      if (this._isHost()) { this._serve(Math.random() < 0.5 ? 1 : -1); }
-      else { this.serveT = 900; }
-      this._toast("VS " + (this.peerName || "?"), this.theme.palette.accent, true);
+      if (info.role === "host") this._serve(Math.random() < 0.5 ? 1 : -1); else this.serveT = 900;
+      this._toast("VS " + (info.peer || "?"), this.theme.palette.accent, true);
     }
-    _onlineWin(name) { this.netPhase = "ended"; this._netWinner = name; }
+    // relayed game messages (m.t is our own type); role tells us who we are
+    _onNetMessage(m, role) {
+      if (m.t === "input") { if (role === "host") this._guestX = m.x; }
+      else if (m.t === "state") { if (role === "guest") this._applyState(m); }
+    }
     _applyState(m) {   // guest: trust the host's authoritative snapshot
-      if (m.phase === "play" && this.netPhase !== "play") { this.netPhase = "play"; this._netWinner = null; this.state = "playing"; }   // (re)start / rematch
       if (!this.ball) this.ball = { x: 0, y: 0, vx: 0, vy: 0, r: this.br };
       const b = this.ball; b.x = m.bx; b.y = m.by; b.vx = m.bvx; b.vy = m.bvy;
       this.player.x = m.hx;                 // host's bottom paddle
       this.sH = m.sH; this.sG = m.sG; this.serveT = m.serveT || 0; this._serveDir = m.sd;
-      if (m.phase === "ended") this._onlineWin(m.win || "");
     }
-    _netTick(dt) {
-      this._netSendT -= dt; if (this._netSendT > 0) return; this._netSendT = 33;   // ~30Hz
-      this._netSendNow();
-    }
-    _netSendNow() {
-      if (!this.net) return;
-      if (this._isGuest()) this.net.send({ t: "input", x: Math.round(this.cpuP.x) });
-      else if (this._isHost()) {
-        const b = this.ball || { x: 0, y: 0, vx: 0, vy: 0 };
-        this.net.send({ t: "state", bx: Math.round(b.x), by: Math.round(b.y), bvx: b.vx, bvy: b.vy,
-          hx: Math.round(this.player.x), sH: this.sH, sG: this.sG, serveT: Math.max(0, this.serveT | 0), sd: this._serveDir,
-          phase: this.netPhase, win: this._netWinner || "" });
-      }
+    _netSendState() {
+      const b = this.ball || { x: 0, y: 0, vx: 0, vy: 0 };
+      this.lobby.sendThrottled({ t: "state", bx: Math.round(b.x), by: Math.round(b.y), bvx: b.vx, bvy: b.vy,
+        hx: Math.round(this.player.x), sH: this.sH, sG: this.sG, serveT: Math.max(0, this.serveT | 0), sd: this._serveDir }, 30);
     }
 
     // ---------------- update ----------------
@@ -242,10 +206,10 @@
       if (this.shakeMag > 0) { this.shakeMag -= dt * 0.05; if (this.shakeMag < 0) this.shakeMag = 0; }
       if (this.flash > 0) { this.flash -= dt / 300; if (this.flash < 0) this.flash = 0; }
       this.particles.update(dt);
+      this.lobby.tick(dt);
       for (let i = this.toasts.length - 1; i >= 0; i--) if (now - this.toasts[i].born > this.toasts[i].life) this.toasts.splice(i, 1);
       if (this.state !== "playing") return;
-      // any online overlay open (lobby / waiting / ended) → freeze the sim, just show UI
-      if (this.netPhase && this.netPhase !== "play") return;
+      if (this.lobby.blocking()) return;   // lobby overlay (menu/waiting/ended/keypad) open → freeze the sim
 
       const c = this.court;
       const minX = c.x + this.pw / 2, maxX = c.x + c.w - this.pw / 2;
@@ -274,7 +238,7 @@
 
       // ===== GUEST: no local sim — send input, dead-reckon the ball between host snapshots =====
       if (this._isGuest()) {
-        this._netTick(dt);
+        this.lobby.sendThrottled({ t: "input", x: Math.round(this.cpuP.x) }, 30);
         const b = this.ball; if (b && this.serveT <= 0) { b.x += b.vx * dt; b.y += b.vy * dt; if (this.theme.effects.trail) { this.trail.push({ x: b.x, y: b.y }); if (this.trail.length > 10) this.trail.shift(); } }
         if (this.serveT > 0) this.serveT = Math.max(0, this.serveT - dt);
         return;
@@ -294,7 +258,7 @@
         this.cpuP.x = clamp(this.cpuP.x + cd, minX, maxX);
       }
 
-      if (this.serveT > 0) { if (this._isHost()) this._netTick(dt); return; }   // ball not in play yet
+      if (this.serveT > 0) { if (this._isHost()) this._netSendState(); return; }   // ball not in play yet
 
       // ---- ball physics (host + CPU mode) ----
       const b = this.ball;
@@ -308,7 +272,7 @@
       // bottom paddle (host/you) — ball heading down
       if (b.vy > 0 && b.y + b.r >= this.playerY && b.y + b.r <= this.playerY + this.ph + Math.abs(b.vy * dt) && Math.abs(b.x - this.player.x) <= this.pw / 2 + b.r) {
         this._paddleHit(this.player.x, -1); b.y = this.playerY - b.r;
-        if (this.mode === "cpu") { this.score += 1; this.rally++; } else this.rally++;
+        if (!this._online()) { this.score += 1; this.rally++; } else this.rally++;
       }
       // top paddle (CPU / remote guest) — ball heading up
       if (b.vy < 0 && b.y - b.r <= this.cpuY + this.ph && b.y - b.r >= this.cpuY - Math.abs(b.vy * dt) && Math.abs(b.x - this.cpuP.x) <= this.pw / 2 + b.r) {
@@ -316,34 +280,28 @@
       }
 
       // scoring
-      if (this.mode === "online") {
+      if (this._online()) {
         if (b.y - b.r > c.y + c.h) { this._onlinePoint("G"); }        // past host (bottom) → guest scores
         else if (b.y + b.r < c.y) { this._onlinePoint("H"); }        // past guest (top) → host scores
-        this._netTick(dt);
+        this._netSendState();
       } else {
         if (b.y - b.r > c.y + c.h) { this._miss(); }
         else if (b.y + b.r < c.y) { this._scorePoint(); }
       }
     }
 
-    _onlinePoint(who) {   // host-authoritative scoring; first to 7 wins
+    _onlinePoint(who) {   // HOST-authoritative scoring; first to 7. lobby relays the neutral verdict to both sides.
       if (who === "H") { this.sH++; this.score += 25; } else { this.sG++; }
       this.audio.play(who === "H" ? "extralife" : "drain");
       if (this.theme.effects.shake) this._shake(6);
       this._burst(this.ball.x, who === "H" ? this.court.y : this.court.y + this.court.h, who === "H" ? this.theme.palette.player : this.theme.palette.cpu);
       const WIN = 7;
       if (this.sH >= WIN || this.sG >= WIN) {
-        this._onlineWin(this.sH >= WIN ? "HOST WINS" : "CHALLENGER WINS");   // NEUTRAL — each side computes win/lose locally
-        this.serveT = 0; this.ball.vx = this.ball.vy = 0; this._netSendNow(); return;
+        this.serveT = 0; this.ball.vx = this.ball.vy = 0;
+        this.lobby.end({ winner: this.sH >= WIN ? "host" : "guest", sub: this.sH + " – " + this.sG });   // each side renders YOU WIN/LOST from its role
+        return;
       }
       this._serve(who === "H" ? 1 : -1);   // serve toward whoever just got scored on
-    }
-    // local display verdict from the neutral result
-    _verdict() {
-      const w = this._netWinner; if (!w) return "";
-      if (w === "HOST WINS") return this._isHost() ? "YOU WIN! 🏆" : "YOU LOST";
-      if (w === "CHALLENGER WINS") return this._isGuest() ? "YOU WIN! 🏆" : "YOU LOST";
-      return w;   // "Opponent left" / "Disconnected"
     }
 
     _paddleHit(paddleX, dir) {   // dir: -1 bounce up (player), +1 bounce down (cpu)
@@ -386,7 +344,6 @@
     // ---------------- render ----------------
     render(now) {
       const ctx = this.ctx2d, th = this.theme, pal = th.palette, c = this.court;
-      this._uiBtns = [];   // rebuilt each frame so hit-tests match what's on screen
       this._drawBg(ctx, th, now);
       let sx = 0, sy = 0;
       if (this.shakeMag > 0.1 && !this.paused) { sx = (Math.random() * 2 - 1) * this.shakeMag; sy = (Math.random() * 2 - 1) * this.shakeMag; }
@@ -407,74 +364,8 @@
 
       this._drawHud(ctx, th, now);
       if (this.flash > 0) { ctx.save(); ctx.globalAlpha = this.flash * 0.4; ctx.fillStyle = pal.danger; ctx.fillRect(0, 0, this._w, this._h); ctx.restore(); }
-      this._drawNetUI(ctx, th, now);
+      this.lobby.render(now);   // PLAY ONLINE pill / lobby / keypad / waiting / result — all reusable chrome
       if (th.effects.scanlines) this._scanlines(ctx);
-    }
-
-    // ---------------- online UI (button + lobby / waiting / result overlays) ----------------
-    _uiButton(ctx, th, label, x, y, w, h, fn, primary) {
-      const pal = th.palette;
-      ctx.save();
-      ctx.fillStyle = primary ? rgba(pal.accent, 0.9) : "rgba(255,255,255,0.08)";
-      this._rr(ctx, x, y, w, h, Math.min(10, h / 2)); ctx.fill();
-      ctx.strokeStyle = primary ? pal.accent : pal.wall; ctx.lineWidth = 1.5;
-      if (th.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = primary ? pal.accent : pal.wall; }
-      this._rr(ctx, x, y, w, h, Math.min(10, h / 2)); ctx.stroke(); ctx.shadowBlur = 0;
-      ctx.fillStyle = primary ? "#06121a" : pal.text; ctx.font = "800 " + Math.round(h * 0.42) + "px " + th.fonts.ui;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(label, x + w / 2, y + h / 2 + 1);
-      ctx.restore();
-      this._uiBtns.push({ x: x, y: y, w: w, h: h, fn: fn });
-    }
-    _drawNetUI(ctx, th, now) {
-      const pal = th.palette, W = this._w, H = this._h, self = this;
-      // no online activity → a discreet "PLAY ONLINE" pill at the very top
-      if (!this.netPhase) {
-        const bw = Math.min(170, W * 0.5), bx = (W - bw) / 2, bh = Math.max(24, Math.round(H * 0.032));
-        this._uiButton(ctx, th, "⇄ PLAY ONLINE", bx, 6, bw, bh, () => self._openLobby(), false);
-        return;
-      }
-      if (this.netPhase === "play") {
-        // small room code + opponent name banner so you know who/where you are
-        ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillStyle = pal.textDim;
-        ctx.font = "700 " + Math.round(H * 0.022) + "px " + th.fonts.ui;
-        ctx.fillText("ROOM " + this.netCode + "   ·   VS " + (this.peerName || "?"), W / 2, 6);
-        ctx.restore();
-        return;
-      }
-      // dim backdrop for lobby / waiting / ended
-      ctx.save(); ctx.fillStyle = "rgba(0,0,0,0.66)"; ctx.fillRect(0, 0, W, H); ctx.restore();
-      const cx = W / 2, panelW = Math.min(320, W * 0.86), bx = cx - panelW / 2;
-      const title = (txt, y, color) => { ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = color || pal.text; if (th.effects.glow) { ctx.shadowBlur = 12; ctx.shadowColor = color || pal.accent; } ctx.font = "800 " + Math.round(H * 0.04) + "px " + th.fonts.ui; ctx.fillText(txt, cx, y); ctx.restore(); };
-      const sub = (txt, y) => { ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = pal.textDim; ctx.font = "600 " + Math.round(H * 0.022) + "px " + th.fonts.ui; ctx.fillText(txt, cx, y); ctx.restore(); };
-      const bh = Math.max(34, Math.round(H * 0.05)), gap = 12;
-      let y = H * 0.30;
-      if (this.netPhase === "lobby") {
-        title("MULTIPLAYER", y, pal.accent); y += H * 0.06;
-        if (!Arcade.Net || !Arcade.Net.configured()) sub("Server not set up yet — see server/README", y); else sub("Play a friend in real time", y);
-        y += H * 0.05;
-        this._uiButton(ctx, th, "CREATE GAME", bx, y, panelW, bh, () => self._createGame(), true); y += bh + gap;
-        this._uiButton(ctx, th, "JOIN GAME", bx, y, panelW, bh, () => self._joinGame(), false); y += bh + gap;
-        this._uiButton(ctx, th, "BACK", bx, y, panelW, bh, () => self._leaveOnline(), false);
-      } else if (this.netPhase === "waiting") {
-        if (this.netRole === "host" || !this.netRole) {
-          title("ROOM CODE", y, pal.accent); y += H * 0.075;
-          title(this.netCode || "····", y, pal.text); y += H * 0.06;
-          sub("Share this code — waiting for opponent" + ".".repeat(((now / 400) | 0) % 4), y);
-        } else { title("JOINING…", y, pal.accent); y += H * 0.07; sub("Connecting to " + (this.netCode || ""), y); }
-        y = H * 0.62;
-        this._uiButton(ctx, th, "CANCEL", bx, y, panelW, bh, () => self._leaveOnline(), false);
-      } else if (this.netPhase === "ended") {
-        const v = this._verdict();
-        title(v || "GAME OVER", y, /WIN/.test(v) ? pal.accent : pal.danger); y += H * 0.06;
-        sub(this.sH + " – " + this.sG + "  (host – challenger)", y); y += H * 0.05;
-        const canRematch = v !== "Opponent left" && v !== "Disconnected";
-        if (canRematch) { this._uiButton(ctx, th, "REMATCH", bx, y, panelW, bh, () => self._rematch(), true); y += bh + gap; }
-        this._uiButton(ctx, th, "LEAVE", bx, y, panelW, bh, () => self._leaveOnline(), false);
-      }
-    }
-    _rematch() {
-      if (this._isHost()) this._startOnlineMatch();
-      else { if (this.net) this.net.send({ t: "rematch" }); this._toast("Asked host for rematch…", this.theme.palette.accent); }
     }
 
     _drawBg(ctx, th, now) {
@@ -532,7 +423,7 @@
       // big CPU / YOU tallies flanking the net
       ctx.fillStyle = pal.textDim; ctx.font = "900 " + Math.round(c.h * 0.10) + "px " + th.fonts.score;
       ctx.globalAlpha = th.id === "classic" ? 0.9 : 0.5;
-      const online = this.mode === "online";
+      const online = this._online();
       const topN = online ? this.sG : this.cpu, botN = online ? this.sH : this.points;   // top paddle's score above the net
       ctx.textBaseline = "bottom"; ctx.fillText(String(topN), c.x + c.w * 0.5, c.y + c.h / 2 - 8);
       ctx.textBaseline = "top"; ctx.fillText(String(botN), c.x + c.w * 0.5, c.y + c.h / 2 + 8);

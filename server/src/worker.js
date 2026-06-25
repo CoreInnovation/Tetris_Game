@@ -18,7 +18,7 @@
        { t:"rematch" } | { t:"bye" } | { t:"emote", ... }
    ========================================================= */
 
-const RELAY_TYPES = new Set(["state", "input", "rematch", "bye", "emote"]);
+const RELAY_TYPES = new Set(["msg", "rematch", "emote", "bye", "state", "input"]);
 const MAX_MSG_BYTES = 4096;          // generous for a paddle/ball snapshot; rejects abuse
 const MSG_PER_SEC = 90;              // ~30Hz state + input headroom; over this = dropped
 
@@ -33,7 +33,8 @@ export default {
       if (request.headers.get("Upgrade") !== "websocket") return cors(new Response("expected websocket", { status: 426 }));
       const code = (url.searchParams.get("code") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
       if (code.length < 4) return cors(new Response("bad room code", { status: 400 }));
-      const id = env.PONG_ROOM.idFromName("pong:" + code);
+      const game = (url.searchParams.get("game") || "g").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16) || "g";
+      const id = env.PONG_ROOM.idFromName(game + ":" + code);   // rooms namespaced per game so codes can't collide across games
       return env.PONG_ROOM.get(id).fetch(request);
     }
     return cors(new Response("not found", { status: 404 }));
