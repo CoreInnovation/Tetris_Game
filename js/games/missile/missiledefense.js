@@ -16,9 +16,9 @@
   const BURN_THRUST = 560, BURN_MAX = 470, TURN_RATE = 3.4, BURN_DRAG = 0.9, SEEK_REACH = 200;
   const PANIC_DIST = 195, SLOW_FACTOR = 0.42, HEAT_IDLE = 650, HEAT_DECAY = 0.7, MULT_DURATION = 14000;
   const ARMY_RANGE = 300;   // soldiers at a battery only open up when a threat is actually within reach (not always blasting)
-  const SUPPORT_MIN_WAVE = 8;   // support drops (×2/×3 multi-fire AND militia/base upgrades) only start once you're deeper in — early game is all about earning your weapons
+  const SUPPORT_MIN_WAVE = 13;  // militia + multi-fire don't appear until you're well into the game — first 12 waves are pure weapon/killstreak gameplay
   const HORNET_SPEED = 430, HORNET_TURN = 6.5, BH_PULL = 340, ZIG_AMP = 48;   // hornets nerfed: slower + lazier tracking
-  const DOCK_H = 240, POWERUP_LIFE = 16000, POWERUP_SLOTS = 3, NEW_WEAPON_BANNER_MS = 6000;   // taller two-row dock + how long a pickup LINGERS + how long the NEW WEAPON banner stays up
+  const DOCK_H = 120, POWERUP_LIFE = 16000, POWERUP_SLOTS = 3, NEW_WEAPON_BANNER_MS = 6000;   // compact dock (half the old DOCK_H=240) — scales well on 4K + leaves more play area
   // Screen-shake is tuned GENTLE: every _shake() request is scaled down and hard-capped, and it
   // decays fast, so even a wall of explosions reads as a firm rumble, not a chaotic earthquake.
   const SHAKE_SCALE = 0.42, SHAKE_CAP = 5.5, SHAKE_DECAY = 0.06;
@@ -86,17 +86,17 @@
   // (see _townFire / the volley loop) — holding more weapons = VARIETY, not more total firepower, so it can't outpace you.
   const TOWN_MAX = 8, TOWN_LVL_MAX = 4;
   const TOWN_UPGRADES = [
-    { id: "slingshot",  name: "SLINGSHOTS",     short: "SLNG", kind: "weapon", proj: "pellet",  cnt: 1, minWave: 2,  range: 260, sfx: "launch",    color: "#cfd24a" },   // weakest: a single pebble
-    { id: "buckshot",   name: "BUCKSHOT",       short: "BUCK", kind: "weapon", proj: "pellet",  cnt: 2, minWave: 3,  range: 300, sfx: "launch",    color: "#ffd24a" },   // fans a spread of pellets
-    { id: "crossbow",   name: "CROSSBOWS",      short: "XBOW", kind: "weapon", proj: "pellet",  cnt: 1, minWave: 4,  range: 470, sfx: "rail",      color: "#7afcff" },   // one precise long-range bolt
-    { id: "rockets",    name: "BOTTLE ROCKETS", short: "RKT",  kind: "weapon", proj: "rocket",  cnt: 1, fw: 24, minWave: 5,  range: 470, sfx: "eject",     color: "#ff7a3a" },   // arcs up, bursts into a firework
-    { id: "bees",       name: "ANGRY BEES",     short: "BEES", kind: "weapon", proj: "bee",     cnt: 1, minWave: 6,  range: 380, sfx: "ufo",       color: "#ffe14d" },   // releases homing stingers
-    { id: "potato",     name: "POTATO CANNON",  short: "SPUD", kind: "weapon", proj: "rocket",  cnt: 1, fw: 20, minWave: 7,  range: 360, sfx: "artillery", color: "#d9a441" },   // lobs a spud -> small burst
-    { id: "molotov",    name: "MOLOTOVS",       short: "MLTV", kind: "weapon", proj: "molotov", cnt: 1, minWave: 8,  range: 360, sfx: "artillery", color: "#ff5a2a" },   // lobs a bottle -> fire patch
-    { id: "cherrybomb", name: "CHERRY BOMBS",   short: "CHRY", kind: "weapon", proj: "rocket",  cnt: 1, fw: 30, minWave: 9,  range: 330, sfx: "boom",      color: "#ff4d6a" },   // a bigger banger
-    { id: "tesla",      name: "TESLA FENCE",    short: "FNCE", kind: "weapon", proj: "tesla",   cnt: 2, minWave: 10, range: 165, sfx: "zap",       color: "#b388ff" },   // chain-lightning between threats
-    { id: "range",      name: "RANGE SCOPE",    short: "RNG",  kind: "range",  minWave: 3,             sfx: "select",     color: "#7afcff" },   // +reach, +fire rate
-    { id: "ammo",       name: "AMMO CRATE",     short: "AMMO", kind: "multi",  minWave: 4,             sfx: "select",     color: "#9aff6a" }    // +shots per volley, more cities fire
+    { id: "slingshot",  name: "SLINGSHOTS",     short: "SLNG", kind: "weapon", proj: "pellet",  cnt: 1, minWave: 13, range: 260, sfx: "launch",    color: "#cfd24a" },   // weakest: a single pebble
+    { id: "buckshot",   name: "BUCKSHOT",       short: "BUCK", kind: "weapon", proj: "pellet",  cnt: 2, minWave: 15, range: 300, sfx: "launch",    color: "#ffd24a" },   // fans a spread of pellets
+    { id: "crossbow",   name: "CROSSBOWS",      short: "XBOW", kind: "weapon", proj: "pellet",  cnt: 1, minWave: 17, range: 470, sfx: "rail",      color: "#7afcff" },   // one precise long-range bolt
+    { id: "rockets",    name: "BOTTLE ROCKETS", short: "RKT",  kind: "weapon", proj: "rocket",  cnt: 1, fw: 24, minWave: 18, range: 470, sfx: "eject",     color: "#ff7a3a" },   // arcs up, bursts into a firework
+    { id: "bees",       name: "ANGRY BEES",     short: "BEES", kind: "weapon", proj: "bee",     cnt: 1, minWave: 19, range: 380, sfx: "ufo",       color: "#ffe14d" },   // releases homing stingers
+    { id: "potato",     name: "POTATO CANNON",  short: "SPUD", kind: "weapon", proj: "rocket",  cnt: 1, fw: 20, minWave: 21, range: 360, sfx: "artillery", color: "#d9a441" },   // lobs a spud -> small burst
+    { id: "molotov",    name: "MOLOTOVS",       short: "MLTV", kind: "weapon", proj: "molotov", cnt: 1, minWave: 22, range: 360, sfx: "artillery", color: "#ff5a2a" },   // lobs a bottle -> fire patch
+    { id: "cherrybomb", name: "CHERRY BOMBS",   short: "CHRY", kind: "weapon", proj: "rocket",  cnt: 1, fw: 30, minWave: 24, range: 330, sfx: "boom",      color: "#ff4d6a" },   // a bigger banger
+    { id: "tesla",      name: "TESLA FENCE",    short: "FNCE", kind: "weapon", proj: "tesla",   cnt: 2, minWave: 26, range: 165, sfx: "zap",       color: "#b388ff" },   // chain-lightning between threats
+    { id: "range",      name: "RANGE SCOPE",    short: "RNG",  kind: "range",  minWave: 14,            sfx: "select",     color: "#7afcff" },   // +reach, +fire rate
+    { id: "ammo",       name: "AMMO CRATE",     short: "AMMO", kind: "multi",  minWave: 16,            sfx: "select",     color: "#9aff6a" }    // +shots per volley, more cities fire
   ];
   const TUMAP = {}; TOWN_UPGRADES.forEach(u => TUMAP[u.id] = u);
   M.TOWN_UPGRADES = TOWN_UPGRADES;
@@ -396,7 +396,7 @@
         ? Math.max(0.52, Math.min(0.95, w / 640))
         : Math.max(1, Math.min(1.7, Math.min(w / 1100, h / 640)));
       // taller weapons dock (~2x), sized by screen RATIO with clamps so it never eats the screen or vanishes
-      this.dockH = Math.round(Math.max(130, Math.min(DOCK_H * this.uiScale, h * 0.32)));
+      this.dockH = Math.round(Math.max(110, Math.min(DOCK_H * this.uiScale, h * 0.20)));
       this.dockTop = h - this.dockH;
       this.groundY = this.dockTop - 12;   // thin ground strip sits just above the control dock
       const slotW = (w - 56) / 9, sx = i => 28 + slotW * (i + 0.5);
@@ -543,10 +543,10 @@
       };
       // weighted category roll — prefer weapons you DON'T have yet (the striving), then town upgrades, then a multi-fire
       const lockedW = WEAPONS.filter(w => !w.base && !this.unlocked[w.id] && this.wave >= w.minWave);   // hard wave-gate: only ~one new weapon unlocks every 3 waves
-      const townPool = TOWN_UPGRADES.filter(u => u.kind !== "weapon" || !this.townUpgrades.includes(u.id));
+      const townPool = TOWN_UPGRADES.filter(u => this.wave >= SUPPORT_MIN_WAVE && (u.kind !== "weapon" || !this.townUpgrades.includes(u.id)));
       const cats = [];
       if (lockedW.length) cats.push(["weapon", 6]);
-      if (townPool.length) cats.push(["town", 3]);   // militia drops are progressive via each upgrade's own minWave (weak ones early, strong rare/late)
+      if (townPool.length) cats.push(["town", 3]);   // militia category only unlocks at SUPPORT_MIN_WAVE; within it, weak ones come first via _weightedPick
       if (this.wave >= SUPPORT_MIN_WAVE) cats.push(["mult", 2]);   // multi-fire stays a later-game support drop
       if (!cats.length) cats.push(["mult", 2]);   // safety: always have something to drop
       let total = cats.reduce((a, c) => a + c[1], 0), r = Math.random() * total, pick = cats[0][0];

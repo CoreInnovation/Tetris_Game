@@ -120,6 +120,7 @@
 
     _create() {
       if (!Arcade.Net || !Arcade.Net.configured()) { this._toast("SERVER NOT SET UP"); return; }
+      this._retries = 0;
       this._connect(Arcade.Net.makeCode());
     }
     _connect(code) {
@@ -136,7 +137,19 @@
         },
         onFull: () => { self._toast("ROOM FULL"); self.leave(); },
         onMessage: (m) => self._onEnvelope(m),
-        onClose: () => { if (!self._leaving && self.online && self.phase !== "ended") self._end({ reason: "disconnected" }, false); },
+        onClose: () => {
+          if (!self._leaving && self.online && self.phase !== "ended") {
+            // if we haven't found a peer yet, auto-retry (handles transient server hibernation wakeup latency)
+            if (self.phase === "waiting" && !self.peerName && (self._retries || 0) < 3) {
+              self._retries = (self._retries || 0) + 1;
+              self.net = null;
+              self._toast("Reconnecting… (" + self._retries + "/3)");
+              setTimeout(() => { if (self.online && self.phase === "waiting") self._connect(self.code); }, 1200);
+            } else {
+              self._end({ reason: "disconnected" }, false);
+            }
+          }
+        },
         onError: () => { self._toast("CONNECTION ERROR"); }
       });
     }
