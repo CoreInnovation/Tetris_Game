@@ -84,60 +84,88 @@ async function postScore(env, request) {
   } catch (e) { return json({ ok: false, error: String(e) }, 500); }
 }
 
+// PongRoom uses the WebSocket Hibernation API (required for new_sqlite_classes DOs):
+//   state.acceptWebSocket(server)  — persists the WS across DO hibernation cycles
+//   ws.serializeAttachment(meta)   — stores peer state on the WS itself (survives hibernation)
+//   state.getWebSockets()          — returns all live accepted WS for this DO
+//   webSocketMessage/Close/Error   — DO-level event handlers (not per-WS addEventListener)
+// Using server.accept() + addEventListener() instead would drop connections when the DO
+// hibernates between messages, causing "DISCONNECTED" with no apparent reason.
 export class PongRoom {
-  constructor(state) { this.state = state; this.peers = []; }   // peers: [{ ws, role, name, win, winReset }]
+  constructor(state, env) { this.state = state; this.env = env; }
 
   async fetch(request) {
     const url = new URL(request.url);
     const name = (url.searchParams.get("name") || "Player").slice(0, 16);
-    this.peers = this.peers.filter(p => { try { return p.ws.readyState === 1; } catch (e) { return false; } });   // prune dead/ghost sockets so a stale host can't block a reused code
-    if (this.peers.length >= 2) {
+    const code = url.searchParams.get("code") || "";
+
+    if (request.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });
+
+    // getWebSockets() returns only live (non-closed) WS that survive hibernation — no manual pruning needed
+    const live = this.state.getWebSockets();
+    if (live.length >= 2) {
       const pair = new WebSocketPair();
       pair[1].accept(); pair[1].send(JSON.stringify({ t: "full" })); pair[1].close(1000, "full");
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
+
     const pair = new WebSocketPair();
     const client = pair[0], server = pair[1];
-    server.accept();
-    const role = this.peers.some(p => p.role === "host") ? "guest" : "host";   // assign by FREE slot, not count, so we never end up with two guests
-    const peer = { ws: server, role, name, win: 0, winReset: Date.now() };
-    this.peers.push(peer);
 
-    const code = url.searchParams.get("code") || "";
+    const hasHost = live.some(ws => { try { const m = ws.deserializeAttachment(); return m && m.role === "host"; } catch { return false; } });
+    const role = hasHost ? "guest" : "host";   // assign by FREE slot — never two guests
+
+    this.state.acceptWebSocket(server);   // attach to DO so the WS survives hibernation
+    server.serializeAttachment({ role, name, win: 0, winReset: 0 });   // peer metadata lives on the WS itself
+
     server.send(JSON.stringify({ t: "role", role, code, name }));
     // tell each side about the other
-    const other = this.peers.find(p => p !== peer);
-    if (other) { other.ws.send(JSON.stringify({ t: "peer", event: "joined", name })); server.send(JSON.stringify({ t: "peer", event: "joined", name: other.name })); }
-
-    server.addEventListener("message", (ev) => this._onMessage(peer, ev));
-    const bye = () => this._drop(peer);
-    server.addEventListener("close", bye);
-    server.addEventListener("error", bye);
+    if (live.length > 0) {
+      try {
+        const other = live[0];
+        const otherMeta = other.deserializeAttachment();
+        other.send(JSON.stringify({ t: "peer", event: "joined", name }));
+        server.send(JSON.stringify({ t: "peer", event: "joined", name: otherMeta ? otherMeta.name : "Opponent" }));
+      } catch {}
+    }
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  _onMessage(peer, ev) {
-    // rate limit (token-ish: reset a counter each second)
+  // DO-level WebSocket event handlers — called by the CF runtime for any accepted WS
+  webSocketMessage(ws, data) {
+    const meta = ws.deserializeAttachment();
+    if (!meta) return;
+    // rate limit (token-bucket: reset counter each second)
     const now = Date.now();
-    if (now - peer.winReset > 1000) { peer.winReset = now; peer.win = 0; }
-    if (++peer.win > MSG_PER_SEC) return;
-    const data = ev.data;
+    if (now - (meta.winReset || 0) > 1000) { meta.winReset = now; meta.win = 0; }
+    if (++meta.win > MSG_PER_SEC) { ws.serializeAttachment(meta); return; }
+    ws.serializeAttachment(meta);
     if (typeof data !== "string" || data.length > MAX_MSG_BYTES) return;
     let msg; try { msg = JSON.parse(data); } catch { return; }
     if (!msg || !RELAY_TYPES.has(msg.t)) return;
-    const other = this.peers.find(p => p !== peer);
-    if (other) { try { other.ws.send(data); } catch {} }
+    const others = this.state.getWebSockets().filter(w => w !== ws);
+    for (const other of others) { try { other.send(data); } catch {} }
   }
 
-  _drop(peer) {
-    const i = this.peers.indexOf(peer); if (i < 0) return;
-    this.peers.splice(i, 1);
-    const other = this.peers[0];
-    if (other) {
-      // if the HOST left, promote the survivor so a rejoin doesn't create a two-guest room
-      if (peer.role === "host" && other.role !== "host") { other.role = "host"; try { other.ws.send(JSON.stringify({ t: "role", role: "host" })); } catch (e) {} }
-      try { other.ws.send(JSON.stringify({ t: "peer", event: "left", name: peer.name })); } catch (e) {}
+  webSocketClose(ws) { this._drop(ws); }
+  webSocketError(ws) { this._drop(ws); }
+
+  _drop(ws) {
+    let meta; try { meta = ws.deserializeAttachment(); } catch {}
+    // getWebSockets() still includes ws during the close handler — filter it out
+    const others = this.state.getWebSockets().filter(w => w !== ws);
+    for (const other of others) {
+      try {
+        const otherMeta = other.deserializeAttachment();
+        // if the HOST left, promote survivor so a rejoin doesn't create a two-guest room
+        if (meta && meta.role === "host" && otherMeta && otherMeta.role !== "host") {
+          const promoted = Object.assign({}, otherMeta, { role: "host" });
+          other.serializeAttachment(promoted);
+          other.send(JSON.stringify({ t: "role", role: "host" }));
+        }
+        other.send(JSON.stringify({ t: "peer", event: "left", name: meta ? meta.name : "" }));
+      } catch {}
     }
   }
 }
