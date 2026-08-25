@@ -361,3 +361,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Wrangler (Cloudflare) local dev cache
+.wrangler/

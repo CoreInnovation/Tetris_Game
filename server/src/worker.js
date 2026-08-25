@@ -19,7 +19,7 @@
    ========================================================= */
 
 const RELAY_TYPES = new Set(["msg", "rematch", "emote", "bye", "state", "input"]);
-const MAX_MSG_BYTES = 4096;          // generous for a paddle/ball snapshot; rejects abuse
+const MAX_MSG_BYTES = 16384;         // co-op snapshots (enemies+trails+dock) run bigger than a pong frame; still rejects abuse
 const MSG_PER_SEC = 90;              // ~30Hz state + input headroom; over this = dropped
 
 export default {
@@ -38,8 +38,15 @@ export default {
       const code = (url.searchParams.get("code") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
       if (code.length < 4) return cors(new Response("bad room code", { status: 400 }));
       const game = (url.searchParams.get("game") || "g").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16) || "g";
-      const id = env.PONG_ROOM.idFromName(game + ":" + code);   // rooms namespaced per game so codes can't collide across games
-      return env.PONG_ROOM.get(id).fetch(request);
+      if (!env.PONG_ROOM) { console.error("PONG_ROOM binding missing — check wrangler.toml + migrations"); return cors(new Response("room backend not configured", { status: 503 })); }
+      // await + catch so a Durable Object failure logs a real reason (see `wrangler tail`) instead of an opaque 500.
+      try {
+        const id = env.PONG_ROOM.idFromName(game + ":" + code);   // rooms namespaced per game so codes can't collide across games
+        return await env.PONG_ROOM.get(id).fetch(request);
+      } catch (e) {
+        console.error("room dispatch failed for", game + ":" + code, "—", e && (e.stack || e.message || String(e)));
+        return cors(new Response("room error", { status: 500 }));
+      }
     }
     return cors(new Response("not found", { status: 404 }));
   }
@@ -101,35 +108,43 @@ export class PongRoom {
 
     if (request.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });
 
-    // getWebSockets() returns only live (non-closed) WS that survive hibernation — no manual pruning needed
-    const live = this.state.getWebSockets();
-    if (live.length >= 2) {
+    try {
+      // getWebSockets() returns only live (non-closed) WS that survive hibernation — no manual pruning needed
+      const live = this.state.getWebSockets();
+      if (live.length >= 2) {
+        const pair = new WebSocketPair();
+        pair[1].accept(); pair[1].send(JSON.stringify({ t: "full" })); pair[1].close(1000, "full");
+        return new Response(null, { status: 101, webSocket: pair[0] });
+      }
+
       const pair = new WebSocketPair();
-      pair[1].accept(); pair[1].send(JSON.stringify({ t: "full" })); pair[1].close(1000, "full");
-      return new Response(null, { status: 101, webSocket: pair[0] });
+      const client = pair[0], server = pair[1];
+
+      const hasHost = live.some(ws => { try { const m = ws.deserializeAttachment(); return m && m.role === "host"; } catch { return false; } });
+      const role = hasHost ? "guest" : "host";   // assign by FREE slot — never two guests
+
+      this.state.acceptWebSocket(server);   // attach to DO so the WS survives hibernation
+      server.serializeAttachment({ role, name, win: 0, winReset: 0 });   // peer metadata lives on the WS itself
+
+      server.send(JSON.stringify({ t: "role", role, code, name }));
+      // tell each side about the other
+      if (live.length > 0) {
+        try {
+          const other = live[0];
+          const otherMeta = other.deserializeAttachment();
+          other.send(JSON.stringify({ t: "peer", event: "joined", name }));
+          server.send(JSON.stringify({ t: "peer", event: "joined", name: otherMeta ? otherMeta.name : "Opponent" }));
+        } catch {}
+      }
+
+      return new Response(null, { status: 101, webSocket: client });
+    } catch (e) {
+      // Most likely cause if this fires on the edge but not in `wrangler dev`: the SQLite-backed
+      // Durable Object class wasn't provisioned on the account (migration didn't apply / plan gate).
+      // Logging it makes the real reason visible in `wrangler tail` instead of an opaque 500.
+      console.error("PongRoom.fetch failed:", e && (e.stack || e.message || String(e)));
+      return new Response("room error", { status: 500 });
     }
-
-    const pair = new WebSocketPair();
-    const client = pair[0], server = pair[1];
-
-    const hasHost = live.some(ws => { try { const m = ws.deserializeAttachment(); return m && m.role === "host"; } catch { return false; } });
-    const role = hasHost ? "guest" : "host";   // assign by FREE slot — never two guests
-
-    this.state.acceptWebSocket(server);   // attach to DO so the WS survives hibernation
-    server.serializeAttachment({ role, name, win: 0, winReset: 0 });   // peer metadata lives on the WS itself
-
-    server.send(JSON.stringify({ t: "role", role, code, name }));
-    // tell each side about the other
-    if (live.length > 0) {
-      try {
-        const other = live[0];
-        const otherMeta = other.deserializeAttachment();
-        other.send(JSON.stringify({ t: "peer", event: "joined", name }));
-        server.send(JSON.stringify({ t: "peer", event: "joined", name: otherMeta ? otherMeta.name : "Opponent" }));
-      } catch {}
-    }
-
-    return new Response(null, { status: 101, webSocket: client });
   }
 
   // DO-level WebSocket event handlers — called by the CF runtime for any accepted WS

@@ -34,6 +34,28 @@ or copy the whole `Tetris_Game` folder to a USB stick and it works anywhere.)
 > Want it as a desktop app later? Because it's pure web tech, this exact folder drops
 > straight into Tauri, Electron, or a MAUI BlazorWebView with zero code changes.
 
+### 🌐 Play online with a friend — **free, no server, no setup**
+
+Real-time co-op (Missile Defense) / versus (Pong). Just open the arcade and play:
+**PLAY ONLINE → CREATE GAME** on one device, **JOIN GAME** + the 4-letter code on the other.
+
+Online is **auto** by default: it tries **WebRTC peer-to-peer first** — the two browsers connect
+*directly* (free Google STUN + the free public PeerJS broker only to introduce them), so game
+data goes straight between players with **no server cost**. If a pair *can't* connect directly
+(strict/corporate NAT), it **silently falls back to a WebSocket relay** so the game still
+connects. The high-frequency gameplay stream stays on free P2P for everyone it can.
+
+**Two browsers on one PC / same Wi-Fi?** Either just use the P2P flow above, or run the tiny
+local relay for a fully offline LAN game:
+
+```
+node server/local-relay.js     # then open http://localhost:8787 in two browser windows
+```
+
+When served from `localhost` the client auto-uses that relay; from anywhere else (GitHub
+Pages, `file://`) it uses free P2P. See [`server/README.md`](server/README.md) for the
+transport switches and the optional Cloudflare path.
+
 ### Controls
 
 **Tetris / Dr. Quackers**

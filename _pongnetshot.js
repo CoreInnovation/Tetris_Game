@@ -1,0 +1,20 @@
+const puppeteer = require("puppeteer-core");
+const path = require("path"), fs = require("fs");
+const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
+const OUT = "C:/Users/ChrisCertus/AppData/Local/Temp/tetris-shots";
+const url = "file:///" + path.resolve(__dirname, "index.html").replace(/\\/g, "/") + "?game=pong";
+(async () => {
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox"] });
+  const p = await browser.newPage();
+  await p.setViewport({ width: 440, height: 880, deviceScaleFactor: 2 });
+  await p.evaluateOnNewDocument(() => { window.ARCADE_NET_URL = "wss://example.workers.dev"; });
+  await p.goto(url, { waitUntil: "networkidle0" });
+  await new Promise(r => setTimeout(r, 400));
+  await p.evaluate(() => { window.__arcade._game._openLobby(); });
+  await new Promise(r => setTimeout(r, 250));
+  await p.screenshot({ path: path.join(OUT, "pong-lobby.png") });
+  await p.evaluate(() => { const g = window.__arcade._game; g.netCode = "RP9U"; g.netPhase = "waiting"; g.netRole = "host"; });
+  await new Promise(r => setTimeout(r, 250));
+  await p.screenshot({ path: path.join(OUT, "pong-waiting.png") });
+  await browser.close();
+})();

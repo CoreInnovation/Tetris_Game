@@ -121,14 +121,15 @@
     _create() {
       if (!Arcade.Net || !Arcade.Net.configured()) { this._toast("SERVER NOT SET UP"); return; }
       this._retries = 0;
-      this._connect(Arcade.Net.makeCode());
+      this._connect(Arcade.Net.makeCode(), true);
     }
-    _connect(code) {
+    _connect(code, asHost) {
       this.code = code; this.online = true; this.role = null; this.peerName = ""; this.connected = false; this.entering = false; this._verdict = null;
+      this._asHost = !!asHost;   // WebRTC needs to know creator(host) vs joiner(guest); the WS relay ignores it (server assigns roles)
       this._setPhase("waiting");
       const self = this;
       this.net = Arcade.Net.connect({
-        code: code, name: this._name(), game: this.gameId,
+        code: code, name: this._name(), game: this.gameId, asHost: this._asHost,
         onOpen: () => { self.connected = true; },
         onRole: (m) => { self.role = m.role; },
         onPeer: (m) => {
@@ -144,13 +145,16 @@
               self._retries = (self._retries || 0) + 1;
               self.net = null;
               self._toast("Reconnecting… (" + self._retries + "/3)");
-              setTimeout(() => { if (self.online && self.phase === "waiting") self._connect(self.code); }, 1200);
+              setTimeout(() => { if (self.online && self.phase === "waiting") self._connect(self.code, self._asHost); }, 1200);
             } else {
               self._end({ reason: "disconnected" }, false);
             }
           }
         },
-        onError: () => { self._toast("CONNECTION ERROR"); }
+        onError: (m) => {
+          const k = m && m.msg;
+          self._toast(k === "no-such-room" ? "NO GAME WITH THAT CODE" : (k === "rtc-load-failed" ? "OFFLINE — CAN'T REACH NET" : "CONNECTION ERROR"));
+        }
       });
     }
     _onEnvelope(m) {
@@ -317,7 +321,7 @@
         const r = { x: k.x, y: k.y, w: k.w, h: k.h };
         if (k.char) r.fn = () => { if (self._entry.length < 4) self._entry += k.char; };
         else if (k.action === "del") r.fn = () => { self._entry = self._entry.slice(0, -1); };
-        else if (k.action === "submit") r.fn = () => { if (self._entry.length >= 4) self._connect(self._entry); };
+        else if (k.action === "submit") r.fn = () => { if (self._entry.length >= 4) self._connect(self._entry, false); };
         else if (k.action === "back") r.fn = () => { self.entering = false; self._entry = ""; };
         this._uiBtns.push(r);
       }
@@ -332,7 +336,7 @@
       if (!this.entering) return false;
       const k = (e.key || "").toUpperCase();
       if (k === "BACKSPACE") { this._entry = this._entry.slice(0, -1); return true; }
-      if (k === "ENTER") { if (this._entry.length >= 4) this._connect(this._entry); return true; }
+      if (k === "ENTER") { if (this._entry.length >= 4) this._connect(this._entry, false); return true; }
       if (k === "ESCAPE") { this.entering = false; this._entry = ""; return true; }
       if (k.length === 1 && CHARSET.indexOf(k) >= 0 && this._entry.length < 4) { this._entry += k; return true; }
       return false;

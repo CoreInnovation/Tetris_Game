@@ -942,7 +942,7 @@
     _coopBroadcast() {
       if (!this.lobby) return;
       const r0 = (v) => Math.round(v), pal = this.theme.palette;   // raw HOST px — the guest adopts the host's world (letterboxed), so coords apply verbatim
-      const e = []; for (let i = 0; i < this.enemies.length && i < 60; i++) { const m = this.enemies[i]; e.push([r0(m.x), r0(m.y), Math.round((m.def && m.def.size) || m.size || 3), (m.def && m.def.color) || pal.enemy]); }
+      const e = []; for (let i = 0; i < this.enemies.length && i < 60; i++) { const m = this.enemies[i]; e.push([r0(m.x), r0(m.y), Math.round((m.def && m.def.size) || m.size || 3), (m.def && m.def.color) || pal.enemy, r0(m.sx != null ? m.sx : m.x), r0(m.sy != null ? m.sy : m.y)]); }   // sx,sy = spawn origin so the guest can draw the full streak (not a dot)
       const bl = []; for (let i = 0; i < this.explosions.length && i < 24; i++) { const x = this.explosions[i]; bl.push([r0(x.x), r0(x.y), r0(x.r || 0), x.color || "#ff8c2a"]); }
       const it = []; for (let i = 0; i < this.interceptors.length && i < 24; i++) { const t = this.interceptors[i]; it.push([r0(t.x), r0(t.y), r0(t.bx != null ? t.bx : t.x), r0(t.by != null ? t.by : t.y), t.color || pal.interceptor]); }
       const uf = []; for (let i = 0; i < this.ufos.length && i < 8; i++) { const u = this.ufos[i]; uf.push([r0(u.x), r0(u.y), Math.round(u.radius || 16)]); }
@@ -1464,7 +1464,7 @@
       if (snap && snap.it) for (const t of snap.it) { ctx.save(); ctx.strokeStyle = t[4]; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(t[2], t[3]); ctx.lineTo(t[0], t[1]); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = t[4]; ctx.beginPath(); ctx.arc(t[0], t[1], 2.5, 0, 6.2832); ctx.fill(); ctx.restore(); }   // host's outgoing shots
       if (snap && snap.uf) for (const u of snap.uf) R.drawUfo(ctx, th, { x: u[0], y: u[1], radius: u[2] || 16 }, now);
       if (snap && snap.bl) for (const x of snap.bl) { const r = x[2]; R.drawExplosion(ctx, th, { x: x[0], y: x[1], r: r, maxR: Math.max(1, r), color: x[3] }); }
-      if (snap && snap.e) for (const m of snap.e) this._drawGuestEnemy(ctx, th, m[0], m[1], m[2], m[3]);
+      if (snap && snap.e) for (const m of snap.e) R.drawEnemy(ctx, th, { x: m[0], y: m[1], sx: (m[4] != null ? m[4] : m[0]), sy: (m[5] != null ? m[5] : m[1]), kind: "basic", def: { size: m[2], color: m[3] } });   // reuse the host renderer: full streak + head (not a dot)
       if (this.coopPow) for (const pu of this.coopPow) R.drawDrop(ctx, th, pu, now, this.uiScale);   // falling supply pods — visible + shootable for the guest
       this.particles.render(ctx);   // guest's own tap/equip feedback bursts (emitted in world coords)
       if (snap && snap.hx != null) R.drawCrosshair(ctx, th, snap.hx, snap.hy, null, this.uiScale);   // host's aim
@@ -1493,16 +1493,6 @@
           frac: d.nwf || 0, keyNum: WEAPONS.findIndex(x => x.id === d.nw) + 1, active: d.aw === d.nw, scale: this.uiScale, now: now, pop: 0 });
       } else this._bannerRect = null;
     }
-    _drawGuestEnemy(ctx, th, x, y, sz, col) {
-      const TAU = Math.PI * 2; sz = Math.max(3, sz);
-      ctx.save();
-      if (th.effects.glow) { ctx.shadowBlur = 8; ctx.shadowColor = col; }
-      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
-      ctx.beginPath(); ctx.moveTo(x, y - sz * 4); ctx.lineTo(x, y); ctx.stroke(); ctx.globalAlpha = 1;   // short trail
-      ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - sz); ctx.lineTo(x + sz, y); ctx.lineTo(x, y + sz); ctx.lineTo(x - sz, y); ctx.closePath(); ctx.fill();   // diamond head
-      ctx.restore();
-    }
-
     // Set ctx.font to the requested size, but SHRINK it so `text` is never wider than maxW — guarantees on-screen text.
     _fitFont(ctx, weight, px, family, text, maxW) {
       ctx.font = weight + " " + Math.round(px) + "px " + family;
