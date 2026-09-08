@@ -363,3 +363,8 @@ MigrationBackup/
 FodyWeavers.xsd
 # Wrangler (Cloudflare) local dev cache
 .wrangler/
+
+# Credentials folder, gitignored ahead of time (STD-REPO-008). Nothing lives here
+# today; reserving the name means a secret cannot arrive unprotected later.
+.secrets/
+credentials/
